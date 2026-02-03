@@ -132,31 +132,34 @@ class TestBugQueryService:
                 assert result["is_duplicate"] is False
 
     @pytest.mark.asyncio
-    async def test_find_similar_excludes_self(
+    async def test_find_similar_passes_exclude_bug_id(
             self,
             query_service,
             mock_db_connection
     ):
-        """Should exclude the bug itself from similar bugs"""
+        """Should pass exclude_bug_id to repository to filter out self"""
         cursor = mock_db_connection.cursor.return_value.__aenter__.return_value
         cursor.fetchone.return_value = ([0.1] * 384,)
 
-        # Results include the bug itself
+        # Repo returns only other bugs (already filtered by exclude_bug_id)
         mock_similar = [
-            {"bug_id": "bug-001", "title": "Self", "similarity": 1.0},  # This should be removed
             {"bug_id": "bug-002", "title": "Similar", "similarity": 0.85}
         ]
 
         with patch.object(query_service.repo, 'get_bug', new_callable=AsyncMock, return_value={"bug_id": "bug-001"}):
-            with patch.object(query_service.repo, 'find_similar', new_callable=AsyncMock, return_value=mock_similar):
+            with patch.object(query_service.repo, 'find_similar', new_callable=AsyncMock, return_value=mock_similar) as mock_find:
                 result = await query_service.find_similar_bugs(
                     conn=mock_db_connection,
                     bug_id="bug-001"
                 )
 
-                # Should not include self
+                # Verify exclude_bug_id was passed to repo
+                mock_find.assert_called_once()
+                call_kwargs = mock_find.call_args.kwargs
+                assert call_kwargs.get("exclude_bug_id") == "bug-001"
+
+                # Verify results
                 bug_ids = [b["bug_id"] for b in result["similar_bugs"]]
-                assert "bug-001" not in bug_ids
                 assert "bug-002" in bug_ids
 
     @pytest.mark.asyncio

@@ -3,12 +3,53 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    # === Database ===
     database_host: str = "localhost"
     database_port: int = 5432
     database_name: str = "bugspotter_intelligence"
     database_user: str = "postgres"
     database_password: str = "postgres"
 
+    # === Authentication ===
+    auth_enabled: bool = Field(
+        default=True,
+        description="Enable API key authentication"
+    )
+    admin_api_key: str | None = Field(
+        default=None,
+        description="Master admin API key (set in env for bootstrapping)"
+    )
+    api_key_prefix: str = Field(
+        default="bsi_",
+        description="Prefix for generated API keys"
+    )
+
+    # === Redis (Rate Limiting) ===
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    redis_password: str | None = None
+    redis_db: int = 0
+    redis_ssl: bool = False
+
+    # === Rate Limiting ===
+    rate_limit_enabled: bool = Field(
+        default=True,
+        description="Enable rate limiting"
+    )
+    rate_limit_default_rpm: int = Field(
+        default=60,
+        ge=1,
+        le=10000,
+        description="Default requests per minute"
+    )
+    rate_limit_window_seconds: int = Field(
+        default=60,
+        ge=1,
+        le=3600,
+        description="Rate limit window in seconds"
+    )
+
+    # === LLM Providers ===
     llm_provider: str = "ollama"
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.1:8b"
@@ -53,3 +94,10 @@ class Settings(BaseSettings):
     @property
     def database_url(self) -> str:
         return f"postgresql://{self.database_user}:{self.database_password}@{self.database_host}:{self.database_port}/{self.database_name}"
+
+    @property
+    def redis_url(self) -> str:
+        """Build Redis connection URL"""
+        auth = f":{self.redis_password}@" if self.redis_password else ""
+        protocol = "rediss" if self.redis_ssl else "redis"
+        return f"{protocol}://{auth}{self.redis_host}:{self.redis_port}/{self.redis_db}"

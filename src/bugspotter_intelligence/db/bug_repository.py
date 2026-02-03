@@ -1,6 +1,8 @@
-from typing import Optional
-from psycopg import AsyncConnection
 from datetime import datetime
+from typing import Optional
+from uuid import UUID
+
+from psycopg import AsyncConnection
 
 
 class BugRepository:
@@ -8,47 +10,69 @@ class BugRepository:
 
     @staticmethod
     async def insert_bug(
-            conn: AsyncConnection,
-            bug_id: str,
-            title: str,
-            description: Optional[str],
-            embedding: list[float]
+        conn: AsyncConnection,
+        bug_id: str,
+        title: str,
+        description: Optional[str],
+        embedding: list[float],
+        tenant_id: Optional[UUID] = None,
     ) -> None:
-        """Insert or update bug embedding"""
+        """
+        Insert or update bug embedding.
+
+        Args:
+            conn: Database connection
+            bug_id: Unique bug identifier
+            title: Bug title
+            description: Bug description
+            embedding: Vector embedding
+            tenant_id: Optional tenant UUID (for multi-tenancy)
+        """
         async with conn.cursor() as cursor:
             await cursor.execute(
                 """
                 INSERT INTO bug_embeddings
-                    (bug_id, title, description, embedding, last_accessed)
-                VALUES (%s, %s, %s, %s, %s) ON CONFLICT (bug_id) 
+                    (bug_id, title, description, embedding, last_accessed, tenant_id)
+                VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (bug_id)
                 DO
                 UPDATE SET
                     title = EXCLUDED.title,
                     description = EXCLUDED.description,
                     embedding = EXCLUDED.embedding,
                     updated_at = CURRENT_TIMESTAMP,
-                    last_accessed = EXCLUDED.last_accessed
+                    last_accessed = EXCLUDED.last_accessed,
+                    tenant_id = COALESCE(EXCLUDED.tenant_id, bug_embeddings.tenant_id)
                 """,
-                (bug_id, title, description, embedding, datetime.now())
+                (bug_id, title, description, embedding, datetime.now(), tenant_id),
             )
             await conn.commit()
 
     @staticmethod
     async def find_similar(
-            conn: AsyncConnection,
-            embedding: list[float],
-            limit: int = 5,
-            threshold: float = 0.7
+        conn: AsyncConnection,
+        embedding: list[float],
+        limit: int = 5,
+        threshold: float = 0.7,
+        tenant_id: Optional[UUID] = None,
+        exclude_bug_id: Optional[str] = None,
     ) -> list[dict]:
         """
-        Find similar bugs using vector similarity
+        Find similar bugs using vector similarity.
 
-        Returns bugs with similarity score >= threshold
+        Args:
+            conn: Database connection
+            embedding: Vector embedding to search with
+            limit: Maximum number of results
+            threshold: Minimum similarity score (0.0-1.0)
+            tenant_id: Filter by tenant (None = no filter for legacy data)
+            exclude_bug_id: Bug ID to exclude from results
+
+        Returns:
+            List of similar bugs with similarity scores
         """
         async with conn.cursor() as cursor:
-            # Use cosine similarity
-            await cursor.execute(
-                """
+            # Build query with optional tenant filter
+            query = """
                 SELECT bug_id,
                        title,
                        description,
@@ -58,12 +82,26 @@ class BugRepository:
                 FROM bug_embeddings
                 WHERE 1 - (embedding <=> %s::vector) >= %s
                   AND status != 'duplicate'
-                ORDER BY embedding <=> %s::vector
-                    LIMIT %s
-                """,
-                (embedding, embedding, threshold, embedding, limit)
-            )
+            """
+            params: list = [embedding, embedding, threshold]
 
+            # Add tenant filter if provided
+            if tenant_id is not None:
+                query += " AND (tenant_id = %s OR tenant_id IS NULL)"
+                params.append(tenant_id)
+
+            # Exclude specific bug (useful when finding duplicates)
+            if exclude_bug_id is not None:
+                query += " AND bug_id != %s"
+                params.append(exclude_bug_id)
+
+            query += """
+                ORDER BY embedding <=> %s::vector
+                LIMIT %s
+            """
+            params.extend([embedding, limit])
+
+            await cursor.execute(query, params)
             rows = await cursor.fetchall()
 
             return [
@@ -73,20 +111,30 @@ class BugRepository:
                     "description": row[2],
                     "status": row[3],
                     "resolution": row[4],
-                    "similarity": float(row[5])
+                    "similarity": float(row[5]),
                 }
                 for row in rows
             ]
 
     @staticmethod
     async def get_bug(
-            conn: AsyncConnection,
-            bug_id: str
+        conn: AsyncConnection,
+        bug_id: str,
+        tenant_id: Optional[UUID] = None,
     ) -> Optional[dict]:
-        """Get a single bug by ID"""
+        """
+        Get a single bug by ID.
+
+        Args:
+            conn: Database connection
+            bug_id: Bug identifier
+            tenant_id: Filter by tenant (None = no filter for legacy data)
+
+        Returns:
+            Bug dict if found, None otherwise
+        """
         async with conn.cursor() as cursor:
-            await cursor.execute(
-                """
+            query = """
                 SELECT bug_id,
                        title,
                        description,
@@ -94,13 +142,19 @@ class BugRepository:
                        resolution,
                        resolution_summary,
                        created_at,
-                       updated_at
+                       updated_at,
+                       tenant_id
                 FROM bug_embeddings
                 WHERE bug_id = %s
-                """,
-                (bug_id,)
-            )
+            """
+            params: list = [bug_id]
 
+            # Add tenant filter if provided
+            if tenant_id is not None:
+                query += " AND (tenant_id = %s OR tenant_id IS NULL)"
+                params.append(tenant_id)
+
+            await cursor.execute(query, params)
             row = await cursor.fetchone()
 
             if not row:
@@ -114,28 +168,49 @@ class BugRepository:
                 "resolution": row[4],
                 "resolution_summary": row[5],
                 "created_at": row[6],
-                "updated_at": row[7]
+                "updated_at": row[7],
+                "tenant_id": row[8],
             }
 
     @staticmethod
     async def update_resolution(
-            conn: AsyncConnection,
-            bug_id: str,
-            resolution: str,
-            resolution_summary: Optional[str] = None,
-            status: str = "resolved"
-    ) -> None:
-        """Update bug resolution information"""
+        conn: AsyncConnection,
+        bug_id: str,
+        resolution: str,
+        resolution_summary: Optional[str] = None,
+        status: str = "resolved",
+        tenant_id: Optional[UUID] = None,
+    ) -> bool:
+        """
+        Update bug resolution information.
+
+        Args:
+            conn: Database connection
+            bug_id: Bug identifier
+            resolution: Resolution text
+            resolution_summary: Optional AI-generated summary
+            status: New status (default: "resolved")
+            tenant_id: Filter by tenant (for ownership verification)
+
+        Returns:
+            True if updated, False if not found or not owned by tenant
+        """
         async with conn.cursor() as cursor:
-            await cursor.execute(
-                """
+            query = """
                 UPDATE bug_embeddings
                 SET resolution         = %s,
                     resolution_summary = %s,
                     status             = %s,
                     updated_at         = CURRENT_TIMESTAMP
                 WHERE bug_id = %s
-                """,
-                (resolution, resolution_summary, status, bug_id)
-            )
+            """
+            params: list = [resolution, resolution_summary, status, bug_id]
+
+            # Add tenant filter if provided
+            if tenant_id is not None:
+                query += " AND (tenant_id = %s OR tenant_id IS NULL)"
+                params.append(tenant_id)
+
+            await cursor.execute(query, params)
             await conn.commit()
+            return cursor.rowcount > 0

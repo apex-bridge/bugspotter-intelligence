@@ -1,4 +1,7 @@
+from uuid import UUID
+
 from pydantic import BaseModel, Field
+
 
 class AskRequest(BaseModel):
     """Request model for /ask endpoint"""
@@ -88,4 +91,33 @@ class UpdateResolutionRequest(BaseModel):
         default="resolved",
         pattern="^(resolved|closed|wont_fix)$",
         description="New bug status"
+    )
+
+
+class CreateAPIKeyRequest(BaseModel):
+    """Request model for creating a new API key"""
+
+    name: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="Human-readable name for the key",
+        examples=["Production API Key", "Development Key"]
+    )
+
+    tenant_id: UUID | None = Field(
+        default=None,
+        description="Tenant ID (admin can specify; defaults to own tenant)"
+    )
+
+    rate_limit_per_minute: int = Field(
+        default=60,
+        ge=1,
+        le=10000,
+        description="Requests per minute limit for this key"
+    )
+
+    is_admin: bool = Field(
+        default=False,
+        description="Whether this key has admin privileges"
     )
