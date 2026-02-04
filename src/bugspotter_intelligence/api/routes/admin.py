@@ -35,9 +35,20 @@ async def create_api_key(
 
     The plain key is returned only once in this response.
     Store it securely - it cannot be retrieved again.
+
+    Security:
+        Admins can only create keys for their own tenant.
+        Cross-tenant key creation is not permitted to prevent privilege escalation.
     """
-    # Admin can create keys for any tenant, or default to their own
-    target_tenant = body.tenant_id or tenant.tenant_id
+    # Security: Prevent admins from creating keys for other tenants
+    # This prevents privilege escalation attacks
+    if body.tenant_id is not None and body.tenant_id != tenant.tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot create API keys for other tenants. Admins can only create keys for their own tenant.",
+        )
+
+    target_tenant = tenant.tenant_id
 
     api_key, plain_key = await service.create_key(
         conn=conn,

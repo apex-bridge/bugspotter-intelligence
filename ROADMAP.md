@@ -355,7 +355,7 @@ Development roadmap for the `bugspotter-intelligence` RAG service. Each phase pr
 | Version | Phase | Key Feature | Status |
 |---------|-------|-------------|--------|
 | v0.1.0 | Phase 1 | Foundation & Similarity | ✅ Complete |
-| v0.2.0 | Phase 2 | Authentication & Security | 🔜 Next |
+| v0.2.0 | Phase 2 | Authentication & Security | ✅ Complete |
 | v0.3.0 | Phase 3 | Smart Search & Caching | Planned |
 | v0.4.0 | Phase 4 | Feedback Loop & Learning | Planned |
 | v0.5.0 | Phase 5 | Root Cause Analysis | Planned |
@@ -373,7 +373,7 @@ Development roadmap for the `bugspotter-intelligence` RAG service. Each phase pr
 - Docker Desktop with 8GB+ RAM allocation
 - PostgreSQL 16 with pgvector
 - Ollama with 8B model (CPU inference OK)
-- Redis (from Phase 3)
+- Redis
 
 ### Production (Recommended)
 - **Compute:** 2+ API instances behind load balancer

@@ -1,6 +1,6 @@
 """Tests for rate limiting middleware"""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import Request

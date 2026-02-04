@@ -9,7 +9,7 @@ from .dependencies import (
 from .models import APIKey, TenantContext
 from .repository import APIKeyRepository
 from .service import APIKeyService
-from .utils import generate_api_key, get_key_prefix, hash_api_key
+from .utils import generate_api_key, get_key_prefix, hash_api_key, verify_api_key
 
 __all__ = [
     # Models
@@ -26,5 +26,6 @@ __all__ = [
     # Utils
     "generate_api_key",
     "hash_api_key",
+    "verify_api_key",
     "get_key_prefix",
 ]

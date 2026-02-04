@@ -1,7 +1,7 @@
 """Tests for API Key service"""
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -99,11 +99,13 @@ class TestAPIKeyService:
     ):
         """Should return TenantContext for valid key"""
         with patch.object(
-            api_key_service.repo, "get_by_hash", new_callable=AsyncMock
-        ) as mock_get, patch.object(
+            api_key_service.repo, "list_by_prefix", new_callable=AsyncMock
+        ) as mock_list, patch.object(
             api_key_service.repo, "update_last_used", new_callable=AsyncMock
-        ):
-            mock_get.return_value = sample_api_key
+        ), patch("bugspotter_intelligence.auth.service.verify_api_key") as mock_verify:
+            # Mock list_by_prefix to return a list of (APIKey, hash) tuples
+            mock_list.return_value = [(sample_api_key, "fake_bcrypt_hash")]
+            mock_verify.return_value = True
 
             result = await api_key_service.validate_key(
                 conn=mock_db_connection,
@@ -121,9 +123,10 @@ class TestAPIKeyService:
     ):
         """Should return None for non-existent key"""
         with patch.object(
-            api_key_service.repo, "get_by_hash", new_callable=AsyncMock
-        ) as mock_get:
-            mock_get.return_value = None
+            api_key_service.repo, "list_by_prefix", new_callable=AsyncMock
+        ) as mock_list:
+            # No matching keys found
+            mock_list.return_value = []
 
             result = await api_key_service.validate_key(
                 conn=mock_db_connection,
@@ -138,9 +141,10 @@ class TestAPIKeyService:
     ):
         """Should return None for revoked key"""
         with patch.object(
-            api_key_service.repo, "get_by_hash", new_callable=AsyncMock
-        ) as mock_get:
-            mock_get.return_value = revoked_api_key
+            api_key_service.repo, "list_by_prefix", new_callable=AsyncMock
+        ) as mock_list, patch("bugspotter_intelligence.auth.service.verify_api_key") as mock_verify:
+            mock_list.return_value = [(revoked_api_key, "fake_bcrypt_hash")]
+            mock_verify.return_value = True
 
             result = await api_key_service.validate_key(
                 conn=mock_db_connection,
@@ -155,11 +159,12 @@ class TestAPIKeyService:
     ):
         """Should update last_used_at on successful validation"""
         with patch.object(
-            api_key_service.repo, "get_by_hash", new_callable=AsyncMock
-        ) as mock_get, patch.object(
+            api_key_service.repo, "list_by_prefix", new_callable=AsyncMock
+        ) as mock_list, patch.object(
             api_key_service.repo, "update_last_used", new_callable=AsyncMock
-        ) as mock_update:
-            mock_get.return_value = sample_api_key
+        ) as mock_update, patch("bugspotter_intelligence.auth.service.verify_api_key") as mock_verify:
+            mock_list.return_value = [(sample_api_key, "fake_bcrypt_hash")]
+            mock_verify.return_value = True
 
             await api_key_service.validate_key(
                 conn=mock_db_connection,

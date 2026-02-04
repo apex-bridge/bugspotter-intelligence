@@ -26,8 +26,8 @@ router = APIRouter(prefix="/bugs", tags=["Bugs"])
 
 @router.post("/analyze", response_model=AnalyzeBugResponse, status_code=201)
 async def analyze_bug(
-    request: AnalyzeBugRequest,
-    http_request: Request,
+    body: AnalyzeBugRequest,
+    request: Request,
     tenant: TenantContext = Depends(check_rate_limit),
     conn: AsyncConnection = Depends(get_db_connection),
     service: BugCommandService = Depends(get_bug_command_service),
@@ -44,12 +44,12 @@ async def analyze_bug(
     """
     result = await service.analyze_and_store_bug(
         conn=conn,
-        bug_id=request.bug_id,
-        title=request.title,
-        description=request.description,
-        console_logs=request.console_logs,
-        network_logs=request.network_logs,
-        metadata=request.metadata,
+        bug_id=body.bug_id,
+        title=body.title,
+        description=body.description,
+        console_logs=body.console_logs,
+        network_logs=body.network_logs,
+        metadata=body.metadata,
         tenant_id=tenant.tenant_id,
     )
 

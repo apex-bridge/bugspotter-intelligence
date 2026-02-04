@@ -1,17 +1,60 @@
 """Sliding window rate limiter implementation"""
 
 import time
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import redis.asyncio as redis
+
+# Lua script for atomic rate limiting.
+# Runs entirely within Redis — no TOCTOU race between check and update.
+# Uses a caller-provided unique member to avoid sorted set collisions.
+_LUA_RATE_LIMIT = """
+local key = KEYS[1]
+local now = tonumber(ARGV[1])
+local window_start = tonumber(ARGV[2])
+local limit = tonumber(ARGV[3])
+local member = ARGV[4]
+local window_seconds = tonumber(ARGV[5])
+
+-- Remove expired entries
+redis.call('ZREMRANGEBYSCORE', key, 0, window_start)
+
+-- Count current requests in window
+local count = redis.call('ZCARD', key)
+
+if count >= limit then
+    -- Over limit: find oldest entry to calculate retry_after
+    local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+    local retry_after = window_seconds
+    if #oldest > 0 then
+        local oldest_time = tonumber(oldest[2])
+        retry_after = math.ceil(oldest_time + window_seconds - now)
+        if retry_after < 1 then
+            retry_after = 1
+        end
+    end
+    return {0, 0, retry_after}
+end
+
+-- Under limit: add and set expiry
+redis.call('ZADD', key, now, member)
+redis.call('EXPIRE', key, window_seconds)
+
+local remaining = limit - count - 1
+if remaining < 0 then
+    remaining = 0
+end
+
+return {1, remaining, 0}
+"""
 
 
 class SlidingWindowRateLimiter:
     """
     Sliding window rate limiter using Redis sorted sets.
 
-    Uses a sliding window counter algorithm to provide accurate
-    rate limiting without the burst issues of fixed windows.
+    Uses a Lua script for atomic check-and-update, with unique
+    member IDs to prevent sorted set collisions under concurrency.
     """
 
     def __init__(self, redis_client: redis.Redis, window_seconds: int = 60):
@@ -24,6 +67,7 @@ class SlidingWindowRateLimiter:
         """
         self.redis = redis_client
         self.window_seconds = window_seconds
+        self._script = self.redis.register_script(_LUA_RATE_LIMIT)
 
     async def is_allowed(
         self,
@@ -46,40 +90,18 @@ class SlidingWindowRateLimiter:
         key = f"rate_limit:{key_id}"
         now = time.time()
         window_start = now - self.window_seconds
+        member = f"{now}:{uuid4()}"
 
-        # Use pipeline for atomic operations
-        pipe = self.redis.pipeline()
+        result = await self._script(
+            keys=[key],
+            args=[now, window_start, limit, member, self.window_seconds],
+        )
 
-        # Remove expired entries
-        pipe.zremrangebyscore(key, 0, window_start)
-        # Count current requests in window
-        pipe.zcard(key)
-        # Add current request (will be committed only if allowed)
-        pipe.zadd(key, {str(now): now})
-        # Set expiry on the key
-        pipe.expire(key, self.window_seconds)
+        allowed = bool(result[0])
+        remaining = int(result[1])
+        retry_after = int(result[2])
 
-        results = await pipe.execute()
-        current_count = results[1]
-
-        if current_count >= limit:
-            # Over limit - calculate retry_after
-            # Get the oldest entry to determine when window will shift
-            oldest = await self.redis.zrange(key, 0, 0, withscores=True)
-            if oldest:
-                oldest_time = oldest[0][1]
-                retry_after = int(oldest_time + self.window_seconds - now) + 1
-            else:
-                retry_after = self.window_seconds
-
-            # Remove the request we just added (over limit)
-            await self.redis.zrem(key, str(now))
-
-            return False, 0, max(1, retry_after)
-
-        # Under limit
-        remaining = limit - current_count - 1
-        return True, max(0, remaining), 0
+        return allowed, remaining, retry_after
 
     async def get_usage(self, key_id: UUID) -> int:
         """

@@ -1,7 +1,8 @@
 """Authentication utility functions"""
 
-import hashlib
 import secrets
+
+import bcrypt
 
 
 def generate_api_key(prefix: str = "bsi_") -> str:
@@ -27,19 +28,50 @@ def generate_api_key(prefix: str = "bsi_") -> str:
 
 def hash_api_key(key: str) -> str:
     """
-    Hash an API key using SHA256.
+    Hash an API key using bcrypt with automatic salt generation.
 
     Args:
         key: The plain text API key
 
     Returns:
-        SHA256 hex digest of the key
+        bcrypt hash of the key (includes salt)
 
     Note:
-        We store only the hash in the database for security.
+        We use bcrypt instead of SHA-256 for security best practices:
+        - Automatic per-key salt generation prevents rainbow table attacks
+        - Configurable work factor (currently 12) makes brute-force attacks costly
+        - Industry standard for credential storage
+
         The plain key is returned to the user only once on creation.
+
+    Security:
+        Even though our API keys are high-entropy random strings generated
+        with secrets.token_urlsafe(32), using bcrypt ensures defense-in-depth
+        and follows security best practices for any credential storage.
     """
-    return hashlib.sha256(key.encode()).hexdigest()
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(key.encode(), salt).decode()
+
+
+def verify_api_key(key: str, key_hash: str) -> bool:
+    """
+    Verify an API key against its stored hash.
+
+    Args:
+        key: The plain text API key to verify
+        key_hash: The stored bcrypt hash
+
+    Returns:
+        True if the key matches the hash, False otherwise
+
+    Example:
+        >>> hashed = hash_api_key("bsi_secret123")
+        >>> verify_api_key("bsi_secret123", hashed)
+        True
+        >>> verify_api_key("bsi_wrong", hashed)
+        False
+    """
+    return bcrypt.checkpw(key.encode(), key_hash.encode())
 
 
 def get_key_prefix(key: str, length: int = 12) -> str:

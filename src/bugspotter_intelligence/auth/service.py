@@ -6,7 +6,7 @@ from psycopg import AsyncConnection
 
 from .models import APIKey, TenantContext
 from .repository import APIKeyRepository
-from .utils import generate_api_key, get_key_prefix, hash_api_key
+from .utils import generate_api_key, get_key_prefix, hash_api_key, verify_api_key
 
 
 class APIKeyService:
@@ -86,9 +86,17 @@ class APIKeyService:
 
         Note:
             Also updates last_used_at timestamp for the key.
+            Uses bcrypt.checkpw for secure hash comparison.
         """
-        key_hash = hash_api_key(plain_key)
-        api_key = await self.repo.get_by_hash(conn, key_hash)
+        key_prefix = get_key_prefix(plain_key)
+        candidates = await self.repo.list_by_prefix(conn, key_prefix)
+
+        # Try to verify against each key with matching prefix
+        api_key = None
+        for candidate_key, candidate_hash in candidates:
+            if verify_api_key(plain_key, candidate_hash):
+                api_key = candidate_key
+                break
 
         if not api_key:
             return None

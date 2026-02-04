@@ -100,23 +100,24 @@ class TestCreateAPIKey:
 
         assert response.plain_key == "bsi_full_key_here"
         assert response.api_key.name == "Test Key"
-        assert "Store this key securely" in response.warning
+
+        # Verify it uses the admin's own tenant_id
+        mock_api_key_service.create_key.assert_called_once()
+        call_kwargs = mock_api_key_service.create_key.call_args.kwargs
+        assert call_kwargs["tenant_id"] == admin_tenant_context.tenant_id
 
     @pytest.mark.asyncio
-    async def test_creates_key_with_custom_tenant(
+    async def test_rejects_cross_tenant_key_creation(
         self, admin_tenant_context, mock_db_connection, mock_api_key_service, mock_request
     ):
-        """Should allow admin to create key for different tenant"""
+        """Should reject attempt to create key for different tenant (security)"""
         from bugspotter_intelligence.api.routes.admin import create_api_key
         from bugspotter_intelligence.models.requests import CreateAPIKeyRequest
 
-        target_tenant = uuid4()
+        target_tenant = uuid4()  # Different tenant
         body = CreateAPIKeyRequest(name="New Key", tenant_id=target_tenant)
 
-        with patch(
-            "bugspotter_intelligence.api.routes.admin.get_api_key_service",
-            return_value=mock_api_key_service,
-        ):
+        with pytest.raises(HTTPException) as exc_info:
             await create_api_key(
                 body=body,
                 request=mock_request,
@@ -125,10 +126,36 @@ class TestCreateAPIKey:
                 service=mock_api_key_service,
             )
 
-        # Verify create_key was called with the target tenant
+        assert exc_info.value.status_code == 403
+        assert "Cannot create API keys for other tenants" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_allows_explicit_own_tenant_id(
+        self, admin_tenant_context, mock_db_connection, mock_api_key_service, mock_request
+    ):
+        """Should allow specifying own tenant_id explicitly"""
+        from bugspotter_intelligence.api.routes.admin import create_api_key
+        from bugspotter_intelligence.models.requests import CreateAPIKeyRequest
+
+        # Same tenant as the admin
+        body = CreateAPIKeyRequest(name="New Key", tenant_id=admin_tenant_context.tenant_id)
+
+        with patch(
+            "bugspotter_intelligence.api.routes.admin.get_api_key_service",
+            return_value=mock_api_key_service,
+        ):
+            response = await create_api_key(
+                body=body,
+                request=mock_request,
+                tenant=admin_tenant_context,
+                conn=mock_db_connection,
+                service=mock_api_key_service,
+            )
+
+        assert response.plain_key == "bsi_full_key_here"
         mock_api_key_service.create_key.assert_called_once()
         call_kwargs = mock_api_key_service.create_key.call_args.kwargs
-        assert call_kwargs["tenant_id"] == target_tenant
+        assert call_kwargs["tenant_id"] == admin_tenant_context.tenant_id
 
 
 class TestListAPIKeys:

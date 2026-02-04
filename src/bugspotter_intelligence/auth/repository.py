@@ -5,6 +5,7 @@ from typing import Optional
 from uuid import UUID
 
 from psycopg import AsyncConnection
+from psycopg.rows import dict_row
 
 from .models import APIKey
 
@@ -70,10 +71,14 @@ class APIKeyRepository:
 
         Args:
             conn: Database connection
-            key_hash: SHA256 hash of the API key
+            key_hash: Hash of the API key (legacy method, prefer list_by_prefix)
 
         Returns:
             APIKey if found, None otherwise
+
+        Note:
+            This method is deprecated for bcrypt keys since bcrypt hashes
+            are non-deterministic. Use list_by_prefix() and verify_api_key() instead.
         """
         async with conn.cursor() as cursor:
             await cursor.execute(
@@ -101,6 +106,56 @@ class APIKeyRepository:
                 rate_limit_per_minute=row[7],
                 is_admin=row[8],
             )
+
+    @staticmethod
+    async def list_by_prefix(
+        conn: AsyncConnection, key_prefix: str
+    ) -> list[tuple[APIKey, str]]:
+        """
+        List all active API keys with a matching prefix, including their hashes.
+
+        Args:
+            conn: Database connection
+            key_prefix: Key prefix to match (e.g., first 12 characters)
+
+        Returns:
+            List of (APIKey, key_hash) tuples for verification
+
+        Note:
+            Used for bcrypt verification where we can't do direct hash lookup.
+            Returns only active (non-revoked) keys.
+            The key_hash is returned for verification but not included in APIKey model.
+        """
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                """
+                SELECT id, tenant_id, key_prefix, name, created_at,
+                       last_used_at, revoked_at, rate_limit_per_minute, is_admin, key_hash
+                FROM api_keys
+                WHERE key_prefix = %s AND revoked_at IS NULL
+                ORDER BY created_at DESC
+                """,
+                (key_prefix,),
+            )
+            rows = await cursor.fetchall()
+
+            return [
+                (
+                    APIKey(
+                        id=row[0],
+                        tenant_id=row[1],
+                        key_prefix=row[2],
+                        name=row[3],
+                        created_at=row[4],
+                        last_used_at=row[5],
+                        revoked_at=row[6],
+                        rate_limit_per_minute=row[7],
+                        is_admin=row[8],
+                    ),
+                    row[9],  # key_hash for verification
+                )
+                for row in rows
+            ]
 
     @staticmethod
     async def list_by_tenant(conn: AsyncConnection, tenant_id: UUID) -> list[APIKey]:

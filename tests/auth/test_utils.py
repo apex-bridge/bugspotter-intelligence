@@ -1,11 +1,10 @@
 """Tests for authentication utility functions"""
 
-import pytest
-
 from bugspotter_intelligence.auth.utils import (
     generate_api_key,
     get_key_prefix,
     hash_api_key,
+    verify_api_key,
 )
 
 
@@ -47,18 +46,23 @@ class TestGenerateApiKey:
 class TestHashApiKey:
     """Test suite for hash_api_key function"""
 
-    def test_returns_sha256_hex_digest(self):
-        """Should return 64-character hex string (SHA256)"""
+    def test_returns_bcrypt_hash(self):
+        """Should return bcrypt hash string"""
         key_hash = hash_api_key("test_key")
-        assert len(key_hash) == 64
-        assert all(c in "0123456789abcdef" for c in key_hash)
+        # bcrypt hashes are 60 characters and start with $2b$
+        assert len(key_hash) == 60
+        assert key_hash.startswith("$2b$")
 
-    def test_same_key_produces_same_hash(self):
-        """Should produce consistent hashes"""
+    def test_same_key_produces_different_hashes(self):
+        """Should produce different hashes due to random salt"""
         key = "bsi_test123"
         hash1 = hash_api_key(key)
         hash2 = hash_api_key(key)
-        assert hash1 == hash2
+        # bcrypt uses random salts, so hashes will differ
+        assert hash1 != hash2
+        # But both should verify correctly
+        assert verify_api_key(key, hash1)
+        assert verify_api_key(key, hash2)
 
     def test_different_keys_produce_different_hashes(self):
         """Should produce different hashes for different keys"""
@@ -66,12 +70,29 @@ class TestHashApiKey:
         hash2 = hash_api_key("key2")
         assert hash1 != hash2
 
-    def test_known_hash_value(self):
-        """Should produce known SHA256 hash"""
-        # SHA256 of "test" is well-known
-        key_hash = hash_api_key("test")
-        expected = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
-        assert key_hash == expected
+
+class TestVerifyApiKey:
+    """Test suite for verify_api_key function"""
+
+    def test_verifies_correct_key(self):
+        """Should verify a correct key against its hash"""
+        plain_key = "bsi_test_secret_123"
+        key_hash = hash_api_key(plain_key)
+        assert verify_api_key(plain_key, key_hash) is True
+
+    def test_rejects_incorrect_key(self):
+        """Should reject an incorrect key"""
+        key_hash = hash_api_key("bsi_correct_key")
+        assert verify_api_key("bsi_wrong_key", key_hash) is False
+
+    def test_verifies_multiple_times(self):
+        """Should consistently verify the same key"""
+        plain_key = "bsi_persistent"
+        key_hash = hash_api_key(plain_key)
+        # Verify multiple times to ensure consistency
+        assert verify_api_key(plain_key, key_hash) is True
+        assert verify_api_key(plain_key, key_hash) is True
+        assert verify_api_key(plain_key, key_hash) is True
 
 
 class TestGetKeyPrefix:
