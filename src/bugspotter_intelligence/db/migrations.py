@@ -21,28 +21,23 @@ async def create_api_keys_table(conn: AsyncConnection) -> None:
             )
         """)
 
-        # Index for fast key lookup
-        await cursor.execute("""
-            CREATE INDEX IF NOT EXISTS api_keys_key_hash_idx
-            ON api_keys(key_hash)
-        """)
-
         # Index for listing keys by tenant
         await cursor.execute("""
             CREATE INDEX IF NOT EXISTS api_keys_tenant_idx
             ON api_keys(tenant_id)
         """)
 
-        # Index for prefix-based key lookup (used in bcrypt validation flow)
+        # Partial index for active key lookup by prefix (authentication flow)
+        # This covers: WHERE key_prefix = ? AND revoked_at IS NULL
         await cursor.execute("""
-            CREATE INDEX IF NOT EXISTS api_keys_key_prefix_idx
-            ON api_keys(key_prefix)
+            CREATE INDEX IF NOT EXISTS api_keys_prefix_active_idx
+            ON api_keys(key_prefix) WHERE revoked_at IS NULL
         """)
 
-        # Partial index for active keys only
+        # Composite index for listing active keys by tenant
         await cursor.execute("""
-            CREATE INDEX IF NOT EXISTS api_keys_active_idx
-            ON api_keys(key_hash) WHERE revoked_at IS NULL
+            CREATE INDEX IF NOT EXISTS api_keys_tenant_active_idx
+            ON api_keys(tenant_id, revoked_at)
         """)
 
         await conn.commit()

@@ -1,6 +1,6 @@
 """Bug analysis endpoints"""
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from psycopg import AsyncConnection
 
 from bugspotter_intelligence.api.deps import (
@@ -27,7 +27,6 @@ router = APIRouter(prefix="/bugs", tags=["Bugs"])
 @router.post("/analyze", response_model=AnalyzeBugResponse, status_code=201)
 async def analyze_bug(
     body: AnalyzeBugRequest,
-    request: Request,
     tenant: TenantContext = Depends(check_rate_limit),
     conn: AsyncConnection = Depends(get_db_connection),
     service: BugCommandService = Depends(get_bug_command_service),
@@ -62,7 +61,6 @@ async def analyze_bug(
 @router.get("/{bug_id}", response_model=BugDetailResponse)
 async def get_bug(
     bug_id: str,
-    request: Request,
     tenant: TenantContext = Depends(check_rate_limit),
     conn: AsyncConnection = Depends(get_db_connection),
     service: BugQueryService = Depends(get_bug_query_service),
@@ -79,7 +77,6 @@ async def get_bug(
 @router.get("/{bug_id}/similar", response_model=SimilarBugsResponse)
 async def find_similar_bugs(
     bug_id: str,
-    request: Request,
     threshold: float | None = None,
     limit: int | None = None,
     tenant: TenantContext = Depends(check_rate_limit),
@@ -116,7 +113,6 @@ async def find_similar_bugs(
 @router.get("/{bug_id}/mitigation", response_model=MitigationResponse)
 async def get_mitigation_suggestion(
     bug_id: str,
-    request: Request,
     use_similar_bugs: bool = True,
     tenant: TenantContext = Depends(check_rate_limit),
     conn: AsyncConnection = Depends(get_db_connection),
@@ -145,7 +141,6 @@ async def get_mitigation_suggestion(
 async def update_resolution(
     bug_id: str,
     body: UpdateResolutionRequest,
-    request: Request,
     tenant: TenantContext = Depends(check_rate_limit),
     conn: AsyncConnection = Depends(get_db_connection),
     service: BugCommandService = Depends(get_bug_command_service),

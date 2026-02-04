@@ -1,6 +1,6 @@
 """Q&A endpoint using LLM"""
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from bugspotter_intelligence.api.deps import get_llm_provider, get_settings
 from bugspotter_intelligence.auth import TenantContext
 from bugspotter_intelligence.config import Settings
@@ -14,7 +14,6 @@ router = APIRouter(prefix="/ask", tags=["Q&A"])
 @router.post("", response_model=AskResponse)
 async def ask_question(
         body: AskRequest,
-        request: Request,
         tenant: TenantContext = Depends(check_rate_limit),
         provider: LLMProvider = Depends(get_llm_provider),
         settings: Settings = Depends(get_settings)

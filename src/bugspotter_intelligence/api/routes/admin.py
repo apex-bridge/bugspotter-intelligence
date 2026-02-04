@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from psycopg import AsyncConnection
 
 from bugspotter_intelligence.auth import (
@@ -25,7 +25,6 @@ router = APIRouter(prefix="/admin", tags=["Admin"])
 @router.post("/api-keys", response_model=CreateAPIKeyResponse, status_code=201)
 async def create_api_key(
     body: CreateAPIKeyRequest,
-    request: Request,
     tenant: TenantContext = Depends(check_rate_limit_admin),
     conn: AsyncConnection = Depends(get_db_connection),
     service: APIKeyService = Depends(get_api_key_service),
@@ -66,7 +65,6 @@ async def create_api_key(
 
 @router.get("/api-keys", response_model=APIKeyListResponse)
 async def list_api_keys(
-    request: Request,
     tenant: TenantContext = Depends(check_rate_limit_admin),
     conn: AsyncConnection = Depends(get_db_connection),
     service: APIKeyService = Depends(get_api_key_service),
@@ -87,7 +85,6 @@ async def list_api_keys(
 @router.get("/api-keys/{key_id}", response_model=APIKeyResponse)
 async def get_api_key(
     key_id: UUID,
-    request: Request,
     tenant: TenantContext = Depends(check_rate_limit_admin),
     conn: AsyncConnection = Depends(get_db_connection),
     service: APIKeyService = Depends(get_api_key_service),
@@ -109,7 +106,6 @@ async def get_api_key(
 @router.delete("/api-keys/{key_id}", status_code=204)
 async def revoke_api_key(
     key_id: UUID,
-    request: Request,
     tenant: TenantContext = Depends(check_rate_limit_admin),
     conn: AsyncConnection = Depends(get_db_connection),
     service: APIKeyService = Depends(get_api_key_service),
