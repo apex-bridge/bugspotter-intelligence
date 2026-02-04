@@ -3,6 +3,82 @@
 from psycopg import AsyncConnection
 
 
+async def create_api_keys_table(conn: AsyncConnection) -> None:
+    """Create api_keys table for authentication"""
+    async with conn.cursor() as cursor:
+        await cursor.execute("""
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                tenant_id UUID NOT NULL,
+                key_hash TEXT NOT NULL UNIQUE,
+                key_prefix TEXT NOT NULL,
+                name TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_used_at TIMESTAMP,
+                revoked_at TIMESTAMP,
+                rate_limit_per_minute INT DEFAULT 60,
+                is_admin BOOLEAN DEFAULT FALSE
+            )
+        """)
+
+        # Index for listing keys by tenant
+        await cursor.execute("""
+            CREATE INDEX IF NOT EXISTS api_keys_tenant_idx
+            ON api_keys(tenant_id)
+        """)
+
+        # Partial index for active key lookup by prefix (authentication flow)
+        # This covers: WHERE key_prefix = ? AND revoked_at IS NULL
+        await cursor.execute("""
+            CREATE INDEX IF NOT EXISTS api_keys_prefix_active_idx
+            ON api_keys(key_prefix) WHERE revoked_at IS NULL
+        """)
+
+        # Composite index for listing active keys by tenant
+        await cursor.execute("""
+            CREATE INDEX IF NOT EXISTS api_keys_tenant_active_idx
+            ON api_keys(tenant_id, revoked_at)
+        """)
+
+        await conn.commit()
+        print("✅ api_keys table created successfully")
+
+
+async def add_tenant_id_to_bug_embeddings(conn: AsyncConnection) -> None:
+    """Add tenant_id column to bug_embeddings table (nullable for migration)"""
+    async with conn.cursor() as cursor:
+        # Check if column already exists
+        await cursor.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'bug_embeddings' AND column_name = 'tenant_id'
+        """)
+        if await cursor.fetchone():
+            print("ℹ️  tenant_id column already exists in bug_embeddings")
+            return
+
+        # Add tenant_id column (nullable for backwards compatibility)
+        await cursor.execute("""
+            ALTER TABLE bug_embeddings
+            ADD COLUMN tenant_id UUID
+        """)
+
+        # Index for tenant filtering
+        await cursor.execute("""
+            CREATE INDEX IF NOT EXISTS bug_embeddings_tenant_idx
+            ON bug_embeddings(tenant_id)
+        """)
+
+        # Composite index for tenant + status queries
+        await cursor.execute("""
+            CREATE INDEX IF NOT EXISTS bug_embeddings_tenant_status_idx
+            ON bug_embeddings(tenant_id, status)
+        """)
+
+        await conn.commit()
+        print("✅ tenant_id column added to bug_embeddings")
+
+
 async def create_tables(conn: AsyncConnection) -> None:
     """
     Create all required tables
@@ -65,4 +141,10 @@ async def create_tables(conn: AsyncConnection) -> None:
                              """)
 
         await conn.commit()
-        print("✅ Database tables created successfully")
+        print("✅ bug_embeddings table created successfully")
+
+    # Create api_keys table
+    await create_api_keys_table(conn)
+
+    # Add tenant_id to bug_embeddings (migration)
+    await add_tenant_id_to_bug_embeddings(conn)

@@ -1,8 +1,10 @@
 from typing import Optional
+from uuid import UUID
+
 from psycopg import AsyncConnection
 
-from bugspotter_intelligence.llm import LLMProvider
 from bugspotter_intelligence.db.bug_repository import BugRepository
+from bugspotter_intelligence.llm import LLMProvider
 from bugspotter_intelligence.services.embeddings import EmbeddingProvider
 from bugspotter_intelligence.utils.log_extractor import build_embedding_text
 
@@ -23,20 +25,31 @@ class BugCommandService:
         self.repo = BugRepository()
 
     async def analyze_and_store_bug(
-            self,
-            conn: AsyncConnection,
-            bug_id: str,
-            title: str,
-            description: Optional[str] = None,
-            console_logs: Optional[list[dict]] = None,
-            network_logs: Optional[list[dict]] = None,
-            metadata: Optional[dict] = None
+        self,
+        conn: AsyncConnection,
+        bug_id: str,
+        title: str,
+        description: Optional[str] = None,
+        console_logs: Optional[list[dict]] = None,
+        network_logs: Optional[list[dict]] = None,
+        metadata: Optional[dict] = None,
+        tenant_id: Optional[UUID] = None,
     ) -> dict:
         """
-        Command: Analyze bug and store its embedding
+        Command: Analyze bug and store its embedding.
 
         Returns analysis result without querying for similar bugs
-        (Query service handles that)
+        (Query service handles that).
+
+        Args:
+            conn: Database connection
+            bug_id: Unique bug identifier
+            title: Bug title
+            description: Bug description
+            console_logs: Console log entries
+            network_logs: Network request logs
+            metadata: Additional metadata
+            tenant_id: Tenant UUID for multi-tenancy
 
         Returns:
             {
@@ -51,7 +64,7 @@ class BugCommandService:
             description=description,
             console_logs=console_logs,
             network_logs=network_logs,
-            metadata=metadata
+            metadata=metadata,
         )
 
         # Generate embedding with DedupKit
@@ -63,43 +76,62 @@ class BugCommandService:
             bug_id=bug_id,
             title=title,
             description=description,
-            embedding=embedding
+            embedding=embedding,
+            tenant_id=tenant_id,
         )
 
         return {
             "bug_id": bug_id,
             "embedding_generated": True,
-            "embedding_text": embedding_text[:200] + "..."  # Truncate for response
+            "embedding_text": embedding_text[:200] + "...",  # Truncate for response
         }
 
     async def update_bug_resolution(
-            self,
-            conn: AsyncConnection,
-            bug_id: str,
-            resolution: str,
-            status: str = "resolved"
+        self,
+        conn: AsyncConnection,
+        bug_id: str,
+        resolution: str,
+        status: str = "resolved",
+        tenant_id: Optional[UUID] = None,
     ) -> dict:
         """
-        Command: Update bug with resolution information
+        Command: Update bug with resolution information.
 
-        This is called when a bug is fixed in the main BugSpotter app
+        This is called when a bug is fixed in the main BugSpotter app.
+
+        Args:
+            conn: Database connection
+            bug_id: Bug identifier
+            resolution: Resolution description
+            status: New status (default: "resolved")
+            tenant_id: Tenant UUID for ownership verification
+
+        Returns:
+            {
+                "bug_id": str,
+                "status": str,
+                "resolution_summary": str,
+                "updated": bool
+            }
         """
         # Optionally: Generate AI summary of the resolution
         resolution_summary = await self._generate_resolution_summary(resolution)
 
         # Update in database
-        await self.repo.update_resolution(
+        updated = await self.repo.update_resolution(
             conn=conn,
             bug_id=bug_id,
             resolution=resolution,
             resolution_summary=resolution_summary,
-            status=status
+            status=status,
+            tenant_id=tenant_id,
         )
 
         return {
             "bug_id": bug_id,
             "status": status,
-            "resolution_summary": resolution_summary
+            "resolution_summary": resolution_summary,
+            "updated": updated,
         }
 
     async def _generate_resolution_summary(self, resolution: str) -> str:

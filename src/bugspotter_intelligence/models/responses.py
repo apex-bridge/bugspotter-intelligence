@@ -1,4 +1,7 @@
+from datetime import datetime
 from typing import Optional
+from uuid import UUID
+
 from pydantic import BaseModel, Field
 
 
@@ -77,3 +80,34 @@ class ResolutionUpdateResponse(BaseModel):
     status: str
     resolution_summary: str
     updated: bool = True
+
+
+class APIKeyResponse(BaseModel):
+    """API key response (masked - key_hash not included)"""
+
+    id: UUID
+    tenant_id: UUID
+    key_prefix: str = Field(..., description="First 12 chars of key for identification")
+    name: str
+    created_at: datetime
+    last_used_at: Optional[datetime] = None
+    is_active: bool
+    rate_limit_per_minute: int
+    is_admin: bool
+
+    model_config = {"from_attributes": True}
+
+
+class CreateAPIKeyResponse(BaseModel):
+    """Response after creating API key (includes plain key ONCE)"""
+
+    api_key: APIKeyResponse
+    plain_key: str = Field(..., description="The full API key - store securely!")
+    warning: str = "Store this key securely. It will not be shown again."
+
+
+class APIKeyListResponse(BaseModel):
+    """List of API keys for a tenant"""
+
+    keys: list[APIKeyResponse]
+    total: int
