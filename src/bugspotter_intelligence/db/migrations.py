@@ -79,6 +79,17 @@ async def add_tenant_id_to_bug_embeddings(conn: AsyncConnection) -> None:
         print("✅ tenant_id column added to bug_embeddings")
 
 
+async def add_search_indexes(conn: AsyncConnection) -> None:
+    """Add composite index for filtered search queries"""
+    async with conn.cursor() as cursor:
+        await cursor.execute("""
+            CREATE INDEX IF NOT EXISTS bug_embeddings_tenant_created_idx
+            ON bug_embeddings(tenant_id, created_at)
+        """)
+        await conn.commit()
+        print("✅ Search indexes created")
+
+
 async def create_tables(conn: AsyncConnection) -> None:
     """
     Create all required tables
@@ -148,3 +159,6 @@ async def create_tables(conn: AsyncConnection) -> None:
 
     # Add tenant_id to bug_embeddings (migration)
     await add_tenant_id_to_bug_embeddings(conn)
+
+    # Add search indexes
+    await add_search_indexes(conn)

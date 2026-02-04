@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -111,3 +111,36 @@ class APIKeyListResponse(BaseModel):
 
     keys: list[APIKeyResponse]
     total: int
+
+
+class SearchResult(BaseModel):
+    """Single result in a search response"""
+
+    bug_id: str
+    title: str
+    description: Optional[str] = None
+    status: str
+    resolution: Optional[str] = None
+    similarity: float = Field(..., ge=0.0, le=1.0, description="Cosine similarity score")
+    created_at: datetime
+
+
+class SearchResponse(BaseModel):
+    """Response model for POST /search endpoint"""
+
+    results: list[SearchResult]
+    total: int = Field(..., ge=0, description="Total matching results (before pagination)")
+    limit: int
+    offset: int
+    mode: Literal["fast", "smart"]
+    query: str
+    cached: bool = False
+
+
+class CacheStatsResponse(BaseModel):
+    """Response model for GET /admin/cache/stats"""
+
+    available: bool = Field(..., description="Whether Redis is available")
+    keyspace_hits: int = Field(..., ge=0, description="Total cache hits since Redis started")
+    keyspace_misses: int = Field(..., ge=0, description="Total cache misses since Redis started")
+    hit_rate: float = Field(..., ge=0.0, le=1.0, description="Cache hit rate (0.0-1.0)")

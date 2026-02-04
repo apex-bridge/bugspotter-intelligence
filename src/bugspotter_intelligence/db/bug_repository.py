@@ -214,3 +214,90 @@ class BugRepository:
             await cursor.execute(query, params)
             await conn.commit()
             return cursor.rowcount > 0
+
+    @staticmethod
+    async def search(
+        conn: AsyncConnection,
+        embedding: list[float],
+        *,
+        tenant_id: UUID,
+        limit: int = 10,
+        offset: int = 0,
+        status: Optional[str] = None,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
+    ) -> tuple[list[dict], int]:
+        """
+        Search bugs by vector similarity with filters and pagination.
+
+        Uses cosine similarity ordering with optional status and date filters.
+        Returns all results for the tenant ordered by relevance.
+
+        Args:
+            conn: Database connection
+            embedding: Query embedding vector
+            tenant_id: Tenant UUID for isolation
+            limit: Page size
+            offset: Page offset
+            status: Optional status filter
+            date_from: Optional created_at lower bound
+            date_to: Optional created_at upper bound
+
+        Returns:
+            Tuple of (result dicts, total matching count)
+        """
+        async with conn.cursor() as cursor:
+            query = """
+                SELECT bug_id,
+                       title,
+                       description,
+                       status,
+                       resolution,
+                       1 - (embedding <=> %s::vector) as similarity,
+                       created_at,
+                       COUNT(*) OVER() as total_count
+                FROM bug_embeddings
+                WHERE (tenant_id = %s OR tenant_id IS NULL)
+            """
+            params: list = [embedding, tenant_id]
+
+            if status is not None:
+                query += " AND status = %s"
+                params.append(status)
+
+            if date_from is not None:
+                query += " AND created_at >= %s"
+                params.append(date_from)
+
+            if date_to is not None:
+                query += " AND created_at <= %s"
+                params.append(date_to)
+
+            query += """
+                ORDER BY embedding <=> %s::vector
+                LIMIT %s OFFSET %s
+            """
+            params.extend([embedding, limit, offset])
+
+            await cursor.execute(query, params)
+            rows = await cursor.fetchall()
+
+            if not rows:
+                return [], 0
+
+            total = rows[0][7]  # total_count from window function
+
+            results = [
+                {
+                    "bug_id": row[0],
+                    "title": row[1],
+                    "description": row[2],
+                    "status": row[3],
+                    "resolution": row[4],
+                    "similarity": float(row[5]),
+                    "created_at": row[6],
+                }
+                for row in rows
+            ]
+
+            return results, total

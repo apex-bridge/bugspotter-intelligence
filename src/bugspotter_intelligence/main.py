@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from bugspotter_intelligence.api.routes import admin, ask, bugs
+from bugspotter_intelligence.api.routes import admin, ask, bugs, search
 from bugspotter_intelligence.config import Settings
 from bugspotter_intelligence.db.database import close_db, get_pool, init_db
 from bugspotter_intelligence.db.migrations import create_tables
@@ -59,6 +59,7 @@ def register_routes(app: FastAPI) -> None:
     """Register all API routes."""
     app.include_router(ask.router, prefix=API_PREFIX)
     app.include_router(bugs.router, prefix=API_PREFIX)
+    app.include_router(search.router, prefix=API_PREFIX)
     app.include_router(admin.router, prefix=API_PREFIX)
 
 
@@ -68,7 +69,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="BugSpotter Intelligence API",
         description="Store bugs in the knowledge base and filter out the duplicates",
-        version="0.2.0",
+        version="0.3.0",
         docs_url="/docs",
         redoc_url="/redoc",
         lifespan=lifespan,

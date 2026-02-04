@@ -2,6 +2,7 @@
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock
+from bugspotter_intelligence.cache.service import CacheService
 from bugspotter_intelligence.config import Settings
 from bugspotter_intelligence.llm import LLMProvider
 from bugspotter_intelligence.services.embeddings import EmbeddingProvider
@@ -46,3 +47,15 @@ def mock_db_connection():
     conn.cursor = MagicMock(return_value=cursor)
     conn.commit = AsyncMock()
     return conn
+
+
+@pytest.fixture
+def mock_cache_service():
+    """Mock CacheService for cache integration tests"""
+    cache = MagicMock(spec=CacheService)
+    cache.get = AsyncMock(return_value=None)
+    cache.set = AsyncMock(return_value=True)
+    cache.delete = AsyncMock(return_value=True)
+    cache.invalidate_tenant = AsyncMock()
+    cache.get_tenant_version = AsyncMock(return_value=0)
+    return cache

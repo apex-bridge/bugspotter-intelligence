@@ -5,8 +5,10 @@ from fastapi import Depends
 from bugspotter_intelligence.config import Settings
 from bugspotter_intelligence.db.database import get_db_connection
 from bugspotter_intelligence.llm import LLMProvider, create_llm_provider
-from bugspotter_intelligence.services import BugCommandService, BugQueryService
+from bugspotter_intelligence.cache import CacheService, get_cache_service
+from bugspotter_intelligence.services import BugCommandService, BugQueryService, SearchService
 from bugspotter_intelligence.services.embeddings import EmbeddingProvider, LocalEmbeddingProvider
+from bugspotter_intelligence.services.reranker import LLMReranker
 
 
 # Global singletons
@@ -40,12 +42,18 @@ def get_embedding_provider() -> EmbeddingProvider:
     return _embedding_provider
 
 
+def get_cache() -> CacheService:
+    """Get CacheService singleton"""
+    return get_cache_service()
+
+
 def get_bug_command_service(
     llm_provider: LLMProvider = Depends(get_llm_provider),
-    embedding_provider: EmbeddingProvider = Depends(get_embedding_provider)
+    embedding_provider: EmbeddingProvider = Depends(get_embedding_provider),
+    cache: CacheService = Depends(get_cache),
 ) -> BugCommandService:
     """Get BugCommandService instance"""
-    return BugCommandService(llm_provider, embedding_provider)
+    return BugCommandService(llm_provider, embedding_provider, cache=cache)
 
 
 def get_bug_query_service(
@@ -57,11 +65,44 @@ def get_bug_query_service(
     return BugQueryService(settings, llm_provider, embedding_provider)
 
 
+def get_reranker(
+    settings: Settings = Depends(get_settings),
+    llm_provider: LLMProvider = Depends(get_llm_provider),
+) -> LLMReranker | None:
+    """Get LLMReranker instance, or None if LLM is unavailable"""
+    try:
+        return LLMReranker(
+            llm_provider,
+            timeout_seconds=settings.smart_search_timeout,
+        )
+    except Exception:
+        return None
+
+
+def get_search_service(
+    settings: Settings = Depends(get_settings),
+    embedding_provider: EmbeddingProvider = Depends(get_embedding_provider),
+    reranker: LLMReranker | None = Depends(get_reranker),
+    cache: CacheService = Depends(get_cache),
+) -> SearchService:
+    """Get SearchService instance"""
+    return SearchService(
+        embedding_provider,
+        reranker=reranker,
+        smart_candidate_limit=settings.smart_search_candidate_limit,
+        cache=cache if settings.cache_enabled else None,
+        cache_ttl_fast=settings.cache_ttl_fast_search,
+        cache_ttl_smart=settings.cache_ttl_smart_search,
+    )
+
+
 __all__ = [
     "get_settings",
     "get_llm_provider",
     "get_embedding_provider",
+    "get_cache",
     "get_bug_command_service",
     "get_bug_query_service",
-    "get_db_connection"
+    "get_search_service",
+    "get_db_connection",
 ]

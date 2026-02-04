@@ -1,3 +1,5 @@
+from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -120,4 +122,50 @@ class CreateAPIKeyRequest(BaseModel):
     is_admin: bool = Field(
         default=False,
         description="Whether this key has admin privileges"
+    )
+
+
+class SearchRequest(BaseModel):
+    """Request model for POST /search endpoint"""
+
+    query: str = Field(
+        ...,
+        min_length=1,
+        max_length=1000,
+        description="Natural language search query",
+        examples=["login page crash on mobile"]
+    )
+
+    mode: Literal["fast", "smart"] = Field(
+        default="fast",
+        description="Search mode: fast (vector similarity) or smart (LLM reranked)"
+    )
+
+    limit: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="Maximum number of results to return"
+    )
+
+    offset: int = Field(
+        default=0,
+        ge=0,
+        description="Pagination offset"
+    )
+
+    status: str | None = Field(
+        default=None,
+        pattern="^(open|resolved|closed|wont_fix|duplicate)$",
+        description="Filter by bug status"
+    )
+
+    date_from: datetime | None = Field(
+        default=None,
+        description="Filter: bugs created on or after this date"
+    )
+
+    date_to: datetime | None = Field(
+        default=None,
+        description="Filter: bugs created on or before this date"
     )

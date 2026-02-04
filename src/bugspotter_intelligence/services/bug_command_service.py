@@ -1,4 +1,5 @@
-from typing import Optional
+import logging
+from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
 from psycopg import AsyncConnection
@@ -7,6 +8,11 @@ from bugspotter_intelligence.db.bug_repository import BugRepository
 from bugspotter_intelligence.llm import LLMProvider
 from bugspotter_intelligence.services.embeddings import EmbeddingProvider
 from bugspotter_intelligence.utils.log_extractor import build_embedding_text
+
+if TYPE_CHECKING:
+    from bugspotter_intelligence.cache.service import CacheService
+
+logger = logging.getLogger(__name__)
 
 
 class BugCommandService:
@@ -19,10 +25,16 @@ class BugCommandService:
     - Mark bugs as duplicates
     """
 
-    def __init__(self, llm_provider: LLMProvider, embedding_provider: EmbeddingProvider):
+    def __init__(
+        self,
+        llm_provider: LLMProvider,
+        embedding_provider: EmbeddingProvider,
+        cache: Optional["CacheService"] = None,
+    ):
         self.llm = llm_provider
         self.embeddings = embedding_provider
         self.repo = BugRepository()
+        self.cache = cache
 
     async def analyze_and_store_bug(
         self,
@@ -79,6 +91,10 @@ class BugCommandService:
             embedding=embedding,
             tenant_id=tenant_id,
         )
+
+        # Invalidate cached search results for this tenant
+        if self.cache is not None and tenant_id is not None:
+            await self.cache.invalidate_tenant(tenant_id)
 
         return {
             "bug_id": bug_id,

@@ -65,6 +65,44 @@ class Settings(BaseSettings):
     embedding_provider: str = "local"  # local, openai
     embedding_model: str | None = None  # Provider-specific model name
 
+    # === Caching ===
+    cache_enabled: bool = Field(
+        default=True,
+        description="Enable Redis caching for search results and embeddings"
+    )
+    cache_ttl_fast_search: int = Field(
+        default=300,
+        ge=1,
+        le=3600,
+        description="TTL for fast search cache in seconds"
+    )
+    cache_ttl_smart_search: int = Field(
+        default=900,
+        ge=1,
+        le=7200,
+        description="TTL for smart search cache in seconds"
+    )
+    cache_ttl_embedding: int = Field(
+        default=3600,
+        ge=1,
+        le=86400,
+        description="TTL for embedding cache in seconds"
+    )
+
+    # === Smart Search ===
+    smart_search_timeout: float = Field(
+        default=10.0,
+        ge=1.0,
+        le=60.0,
+        description="Timeout in seconds for LLM reranking in smart search"
+    )
+    smart_search_candidate_limit: int = Field(
+        default=20,
+        ge=5,
+        le=100,
+        description="Number of candidates to retrieve for LLM reranking"
+    )
+
     #=== Similarity and Deduplication Settings ===
     similarity_threshold: float = Field(
         default=0.75,
