@@ -2,17 +2,17 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from psycopg import AsyncConnection
 
 from bugspotter_intelligence.auth import (
     APIKeyService,
     TenantContext,
     get_api_key_service,
-    require_admin,
 )
 from bugspotter_intelligence.db.database import get_db_connection
 from bugspotter_intelligence.models.requests import CreateAPIKeyRequest
+from bugspotter_intelligence.rate_limiting import check_rate_limit_admin
 from bugspotter_intelligence.models.responses import (
     APIKeyListResponse,
     APIKeyResponse,
@@ -24,8 +24,9 @@ router = APIRouter(prefix="/admin", tags=["Admin"])
 
 @router.post("/api-keys", response_model=CreateAPIKeyResponse, status_code=201)
 async def create_api_key(
-    request: CreateAPIKeyRequest,
-    tenant: TenantContext = Depends(require_admin),
+    body: CreateAPIKeyRequest,
+    request: Request,
+    tenant: TenantContext = Depends(check_rate_limit_admin),
     conn: AsyncConnection = Depends(get_db_connection),
     service: APIKeyService = Depends(get_api_key_service),
 ) -> CreateAPIKeyResponse:
@@ -36,42 +37,36 @@ async def create_api_key(
     Store it securely - it cannot be retrieved again.
     """
     # Admin can create keys for any tenant, or default to their own
-    target_tenant = request.tenant_id or tenant.tenant_id
+    target_tenant = body.tenant_id or tenant.tenant_id
 
-    try:
-        api_key, plain_key = await service.create_key(
-            conn=conn,
-            tenant_id=target_tenant,
-            name=request.name,
-            rate_limit_per_minute=request.rate_limit_per_minute,
-            is_admin=request.is_admin,
-        )
+    api_key, plain_key = await service.create_key(
+        conn=conn,
+        tenant_id=target_tenant,
+        name=body.name,
+        rate_limit_per_minute=body.rate_limit_per_minute,
+        is_admin=body.is_admin,
+    )
 
-        return CreateAPIKeyResponse(
-            api_key=APIKeyResponse(
-                id=api_key.id,
-                tenant_id=api_key.tenant_id,
-                key_prefix=api_key.key_prefix,
-                name=api_key.name,
-                created_at=api_key.created_at,
-                last_used_at=api_key.last_used_at,
-                is_active=api_key.is_active,
-                rate_limit_per_minute=api_key.rate_limit_per_minute,
-                is_admin=api_key.is_admin,
-            ),
-            plain_key=plain_key,
-        )
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create API key: {str(e)}",
-        )
+    return CreateAPIKeyResponse(
+        api_key=APIKeyResponse(
+            id=api_key.id,
+            tenant_id=api_key.tenant_id,
+            key_prefix=api_key.key_prefix,
+            name=api_key.name,
+            created_at=api_key.created_at,
+            last_used_at=api_key.last_used_at,
+            is_active=api_key.is_active,
+            rate_limit_per_minute=api_key.rate_limit_per_minute,
+            is_admin=api_key.is_admin,
+        ),
+        plain_key=plain_key,
+    )
 
 
 @router.get("/api-keys", response_model=APIKeyListResponse)
 async def list_api_keys(
-    tenant: TenantContext = Depends(require_admin),
+    request: Request,
+    tenant: TenantContext = Depends(check_rate_limit_admin),
     conn: AsyncConnection = Depends(get_db_connection),
     service: APIKeyService = Depends(get_api_key_service),
 ) -> APIKeyListResponse:
@@ -80,38 +75,32 @@ async def list_api_keys(
 
     Keys are masked - only the prefix is shown.
     """
-    try:
-        keys = await service.list_keys(conn, tenant.tenant_id)
+    keys = await service.list_keys(conn, tenant.tenant_id)
 
-        return APIKeyListResponse(
-            keys=[
-                APIKeyResponse(
-                    id=k.id,
-                    tenant_id=k.tenant_id,
-                    key_prefix=k.key_prefix,
-                    name=k.name,
-                    created_at=k.created_at,
-                    last_used_at=k.last_used_at,
-                    is_active=k.is_active,
-                    rate_limit_per_minute=k.rate_limit_per_minute,
-                    is_admin=k.is_admin,
-                )
-                for k in keys
-            ],
-            total=len(keys),
-        )
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list API keys: {str(e)}",
-        )
+    return APIKeyListResponse(
+        keys=[
+            APIKeyResponse(
+                id=k.id,
+                tenant_id=k.tenant_id,
+                key_prefix=k.key_prefix,
+                name=k.name,
+                created_at=k.created_at,
+                last_used_at=k.last_used_at,
+                is_active=k.is_active,
+                rate_limit_per_minute=k.rate_limit_per_minute,
+                is_admin=k.is_admin,
+            )
+            for k in keys
+        ],
+        total=len(keys),
+    )
 
 
 @router.get("/api-keys/{key_id}", response_model=APIKeyResponse)
 async def get_api_key(
     key_id: UUID,
-    tenant: TenantContext = Depends(require_admin),
+    request: Request,
+    tenant: TenantContext = Depends(check_rate_limit_admin),
     conn: AsyncConnection = Depends(get_db_connection),
     service: APIKeyService = Depends(get_api_key_service),
 ) -> APIKeyResponse:
@@ -142,7 +131,8 @@ async def get_api_key(
 @router.delete("/api-keys/{key_id}", status_code=204)
 async def revoke_api_key(
     key_id: UUID,
-    tenant: TenantContext = Depends(require_admin),
+    request: Request,
+    tenant: TenantContext = Depends(check_rate_limit_admin),
     conn: AsyncConnection = Depends(get_db_connection),
     service: APIKeyService = Depends(get_api_key_service),
 ) -> None:

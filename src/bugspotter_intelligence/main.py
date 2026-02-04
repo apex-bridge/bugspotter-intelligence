@@ -1,8 +1,9 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from bugspotter_intelligence.api.routes import admin, ask, bugs
 from bugspotter_intelligence.config import Settings
@@ -86,6 +87,17 @@ def create_app() -> FastAPI:
     app.add_middleware(RateLimitMiddleware, settings=settings)
 
     register_routes(app)
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, exc: Exception):
+        """Log unhandled exceptions with full traceback, return clean response."""
+        logger.exception(
+            f"Unhandled exception on {request.method} {request.url.path}"
+        )
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error"},
+        )
 
     @app.get("/health")
     async def health_check():

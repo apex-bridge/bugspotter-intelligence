@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from bugspotter_intelligence.auth.models import APIKey, TenantContext
 
@@ -65,25 +65,34 @@ def mock_api_key_service(sample_api_key):
     return service
 
 
+@pytest.fixture
+def mock_request():
+    """Mock FastAPI request"""
+    request = MagicMock(spec=Request)
+    request.state = MagicMock()
+    return request
+
+
 class TestCreateAPIKey:
     """Tests for POST /admin/api-keys endpoint"""
 
     @pytest.mark.asyncio
     async def test_creates_key_for_admin(
-        self, admin_tenant_context, mock_db_connection, mock_api_key_service
+        self, admin_tenant_context, mock_db_connection, mock_api_key_service, mock_request
     ):
         """Should create key when caller is admin"""
         from bugspotter_intelligence.api.routes.admin import create_api_key
         from bugspotter_intelligence.models.requests import CreateAPIKeyRequest
 
-        request = CreateAPIKeyRequest(name="New Key")
+        body = CreateAPIKeyRequest(name="New Key")
 
         with patch(
             "bugspotter_intelligence.api.routes.admin.get_api_key_service",
             return_value=mock_api_key_service,
         ):
             response = await create_api_key(
-                request=request,
+                body=body,
+                request=mock_request,
                 tenant=admin_tenant_context,
                 conn=mock_db_connection,
                 service=mock_api_key_service,
@@ -95,21 +104,22 @@ class TestCreateAPIKey:
 
     @pytest.mark.asyncio
     async def test_creates_key_with_custom_tenant(
-        self, admin_tenant_context, mock_db_connection, mock_api_key_service
+        self, admin_tenant_context, mock_db_connection, mock_api_key_service, mock_request
     ):
         """Should allow admin to create key for different tenant"""
         from bugspotter_intelligence.api.routes.admin import create_api_key
         from bugspotter_intelligence.models.requests import CreateAPIKeyRequest
 
         target_tenant = uuid4()
-        request = CreateAPIKeyRequest(name="New Key", tenant_id=target_tenant)
+        body = CreateAPIKeyRequest(name="New Key", tenant_id=target_tenant)
 
         with patch(
             "bugspotter_intelligence.api.routes.admin.get_api_key_service",
             return_value=mock_api_key_service,
         ):
             await create_api_key(
-                request=request,
+                body=body,
+                request=mock_request,
                 tenant=admin_tenant_context,
                 conn=mock_db_connection,
                 service=mock_api_key_service,
@@ -126,7 +136,7 @@ class TestListAPIKeys:
 
     @pytest.mark.asyncio
     async def test_lists_keys_for_tenant(
-        self, admin_tenant_context, mock_db_connection, mock_api_key_service
+        self, admin_tenant_context, mock_db_connection, mock_api_key_service, mock_request
     ):
         """Should list all keys for tenant"""
         from bugspotter_intelligence.api.routes.admin import list_api_keys
@@ -136,6 +146,7 @@ class TestListAPIKeys:
             return_value=mock_api_key_service,
         ):
             response = await list_api_keys(
+                request=mock_request,
                 tenant=admin_tenant_context,
                 conn=mock_db_connection,
                 service=mock_api_key_service,
@@ -151,7 +162,7 @@ class TestGetAPIKey:
 
     @pytest.mark.asyncio
     async def test_gets_key_by_id(
-        self, admin_tenant_context, mock_db_connection, mock_api_key_service, sample_api_key
+        self, admin_tenant_context, mock_db_connection, mock_api_key_service, sample_api_key, mock_request
     ):
         """Should return key when found"""
         from bugspotter_intelligence.api.routes.admin import get_api_key
@@ -162,6 +173,7 @@ class TestGetAPIKey:
         ):
             response = await get_api_key(
                 key_id=sample_api_key.id,
+                request=mock_request,
                 tenant=admin_tenant_context,
                 conn=mock_db_connection,
                 service=mock_api_key_service,
@@ -172,7 +184,7 @@ class TestGetAPIKey:
 
     @pytest.mark.asyncio
     async def test_returns_404_when_not_found(
-        self, admin_tenant_context, mock_db_connection, mock_api_key_service
+        self, admin_tenant_context, mock_db_connection, mock_api_key_service, mock_request
     ):
         """Should return 404 when key not found"""
         from bugspotter_intelligence.api.routes.admin import get_api_key
@@ -182,6 +194,7 @@ class TestGetAPIKey:
         with pytest.raises(HTTPException) as exc_info:
             await get_api_key(
                 key_id=uuid4(),
+                request=mock_request,
                 tenant=admin_tenant_context,
                 conn=mock_db_connection,
                 service=mock_api_key_service,
@@ -195,13 +208,14 @@ class TestRevokeAPIKey:
 
     @pytest.mark.asyncio
     async def test_revokes_key(
-        self, admin_tenant_context, mock_db_connection, mock_api_key_service
+        self, admin_tenant_context, mock_db_connection, mock_api_key_service, mock_request
     ):
         """Should revoke key and return 204"""
         from bugspotter_intelligence.api.routes.admin import revoke_api_key
 
         result = await revoke_api_key(
             key_id=uuid4(),
+            request=mock_request,
             tenant=admin_tenant_context,
             conn=mock_db_connection,
             service=mock_api_key_service,
@@ -211,7 +225,7 @@ class TestRevokeAPIKey:
 
     @pytest.mark.asyncio
     async def test_returns_404_when_not_found(
-        self, admin_tenant_context, mock_db_connection, mock_api_key_service
+        self, admin_tenant_context, mock_db_connection, mock_api_key_service, mock_request
     ):
         """Should return 404 when key not found"""
         from bugspotter_intelligence.api.routes.admin import revoke_api_key
@@ -221,6 +235,7 @@ class TestRevokeAPIKey:
         with pytest.raises(HTTPException) as exc_info:
             await revoke_api_key(
                 key_id=uuid4(),
+                request=mock_request,
                 tenant=admin_tenant_context,
                 conn=mock_db_connection,
                 service=mock_api_key_service,
