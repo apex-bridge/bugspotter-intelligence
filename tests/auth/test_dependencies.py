@@ -7,12 +7,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 
-from bugspotter_intelligence.auth.dependencies import (
-    get_api_key_service,
-    get_current_tenant,
-    get_optional_tenant,
-    require_admin,
-)
+import bugspotter_intelligence.auth.dependencies as deps
 from bugspotter_intelligence.auth.models import TenantContext
 from bugspotter_intelligence.config import Settings
 
@@ -75,22 +70,20 @@ class TestGetApiKeyService:
     def test_returns_api_key_service(self, mock_settings):
         """Should return APIKeyService instance"""
         # Reset singleton
-        import bugspotter_intelligence.auth.dependencies as deps
         deps._api_key_service = None
 
         with patch("bugspotter_intelligence.auth.dependencies.Settings", return_value=mock_settings):
-            service = get_api_key_service(mock_settings)
+            service = deps.get_api_key_service(mock_settings)
 
         from bugspotter_intelligence.auth.service import APIKeyService
         assert isinstance(service, APIKeyService)
 
     def test_returns_singleton(self, mock_settings):
         """Should return same instance on subsequent calls"""
-        import bugspotter_intelligence.auth.dependencies as deps
         deps._api_key_service = None
 
-        service1 = get_api_key_service(mock_settings)
-        service2 = get_api_key_service(mock_settings)
+        service1 = deps.get_api_key_service(mock_settings)
+        service2 = deps.get_api_key_service(mock_settings)
 
         assert service1 is service2
 
@@ -103,7 +96,7 @@ class TestGetCurrentTenant:
         self, mock_settings_auth_disabled, mock_db_connection
     ):
         """Should return development tenant when auth is disabled"""
-        result = await get_current_tenant(
+        result = await deps.get_current_tenant(
             credentials=None,
             conn=mock_db_connection,
             settings=mock_settings_auth_disabled,
@@ -119,7 +112,7 @@ class TestGetCurrentTenant:
     ):
         """Should raise 401 when no credentials provided"""
         with pytest.raises(HTTPException) as exc_info:
-            await get_current_tenant(
+            await deps.get_current_tenant(
                 credentials=None,
                 conn=mock_db_connection,
                 settings=mock_settings,
@@ -133,17 +126,16 @@ class TestGetCurrentTenant:
         self, mock_settings, mock_db_connection, mock_credentials
     ):
         """Should raise 401 when API key is invalid"""
-        import bugspotter_intelligence.auth.dependencies as deps
         deps._api_key_service = None
 
         with patch.object(
-            get_api_key_service(mock_settings),
+            deps.get_api_key_service(mock_settings),
             "validate_key",
             new_callable=AsyncMock,
             return_value=None,
         ):
             with pytest.raises(HTTPException) as exc_info:
-                await get_current_tenant(
+                await deps.get_current_tenant(
                     credentials=mock_credentials,
                     conn=mock_db_connection,
                     settings=mock_settings,
@@ -157,7 +149,6 @@ class TestGetCurrentTenant:
         self, mock_settings, mock_db_connection, mock_credentials, sample_tenant_context
     ):
         """Should return TenantContext for valid API key"""
-        import bugspotter_intelligence.auth.dependencies as deps
         deps._api_key_service = None
 
         mock_service = MagicMock()
@@ -167,7 +158,7 @@ class TestGetCurrentTenant:
             "bugspotter_intelligence.auth.dependencies.get_api_key_service",
             return_value=mock_service,
         ):
-            result = await get_current_tenant(
+            result = await deps.get_current_tenant(
                 credentials=mock_credentials,
                 conn=mock_db_connection,
                 settings=mock_settings,
@@ -182,14 +173,14 @@ class TestRequireAdmin:
     @pytest.mark.asyncio
     async def test_returns_tenant_for_admin(self, admin_tenant_context):
         """Should return tenant context for admin users"""
-        result = await require_admin(tenant=admin_tenant_context)
+        result = await deps.require_admin(tenant=admin_tenant_context)
         assert result == admin_tenant_context
 
     @pytest.mark.asyncio
     async def test_raises_403_for_non_admin(self, sample_tenant_context):
         """Should raise 403 for non-admin users"""
         with pytest.raises(HTTPException) as exc_info:
-            await require_admin(tenant=sample_tenant_context)
+            await deps.require_admin(tenant=sample_tenant_context)
 
         assert exc_info.value.status_code == 403
         assert "Admin privileges required" in exc_info.value.detail
@@ -203,7 +194,7 @@ class TestGetOptionalTenant:
         self, mock_settings, mock_db_connection
     ):
         """Should return None when no credentials provided"""
-        result = await get_optional_tenant(
+        result = await deps.get_optional_tenant(
             credentials=None,
             conn=mock_db_connection,
             settings=mock_settings,
@@ -223,7 +214,7 @@ class TestGetOptionalTenant:
             "bugspotter_intelligence.auth.dependencies.get_api_key_service",
             return_value=mock_service,
         ):
-            result = await get_optional_tenant(
+            result = await deps.get_optional_tenant(
                 credentials=mock_credentials,
                 conn=mock_db_connection,
                 settings=mock_settings,
@@ -243,7 +234,7 @@ class TestGetOptionalTenant:
             "bugspotter_intelligence.auth.dependencies.get_api_key_service",
             return_value=mock_service,
         ):
-            result = await get_optional_tenant(
+            result = await deps.get_optional_tenant(
                 credentials=mock_credentials,
                 conn=mock_db_connection,
                 settings=mock_settings,

@@ -24,18 +24,18 @@ def mock_db_connection():
 
 @pytest.fixture
 def sample_api_key_row():
-    """Sample row returned from database"""
-    return (
-        uuid4(),  # id
-        uuid4(),  # tenant_id
-        "bsi_abc12345",  # key_prefix
-        "Test Key",  # name
-        datetime.now(),  # created_at
-        None,  # last_used_at
-        None,  # revoked_at
-        60,  # rate_limit_per_minute
-        False,  # is_admin
-    )
+    """Sample row returned from database (as dict for dict_row compatibility)"""
+    return {
+        "id": uuid4(),
+        "tenant_id": uuid4(),
+        "key_prefix": "bsi_abc12345",
+        "name": "Test Key",
+        "created_at": datetime.now(),
+        "last_used_at": None,
+        "revoked_at": None,
+        "rate_limit_per_minute": 60,
+        "is_admin": False,
+    }
 
 
 class TestAPIKeyRepository:
@@ -53,7 +53,7 @@ class TestAPIKeyRepository:
 
         result = await APIKeyRepository.insert_key(
             conn=mock_db_connection,
-            tenant_id=sample_api_key_row[1],
+            tenant_id=sample_api_key_row["tenant_id"],
             key_hash="abc123hash",
             key_prefix="bsi_abc12345",
             name="Test Key",
@@ -82,7 +82,7 @@ class TestAPIKeyRepository:
         )
 
         assert isinstance(result, APIKey)
-        assert result.tenant_id == sample_api_key_row[1]
+        assert result.tenant_id == sample_api_key_row["tenant_id"]
 
     @pytest.mark.asyncio
     async def test_get_by_hash_returns_none_when_not_found(self, mock_db_connection):
@@ -176,8 +176,8 @@ class TestAPIKeyRepository:
 
         result = await APIKeyRepository.get_by_id(
             conn=mock_db_connection,
-            key_id=sample_api_key_row[0],
-            tenant_id=sample_api_key_row[1],
+            key_id=sample_api_key_row["id"],
+            tenant_id=sample_api_key_row["tenant_id"],
         )
 
         assert isinstance(result, APIKey)

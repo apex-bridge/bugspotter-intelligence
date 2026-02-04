@@ -29,7 +29,7 @@ class APIKeyRepository:
         Args:
             conn: Database connection
             tenant_id: UUID of the tenant
-            key_hash: SHA256 hash of the API key
+            key_hash: bcrypt hash of the API key
             key_prefix: First 12 chars of the key for display
             name: Human-readable name
             rate_limit_per_minute: Rate limit for this key
@@ -38,7 +38,7 @@ class APIKeyRepository:
         Returns:
             The created APIKey object
         """
-        async with conn.cursor() as cursor:
+        async with conn.cursor(row_factory=dict_row) as cursor:
             await cursor.execute(
                 """
                 INSERT INTO api_keys
@@ -52,17 +52,7 @@ class APIKeyRepository:
             row = await cursor.fetchone()
             await conn.commit()
 
-            return APIKey(
-                id=row[0],
-                tenant_id=row[1],
-                key_prefix=row[2],
-                name=row[3],
-                created_at=row[4],
-                last_used_at=row[5],
-                revoked_at=row[6],
-                rate_limit_per_minute=row[7],
-                is_admin=row[8],
-            )
+            return APIKey.model_validate(row)
 
     @staticmethod
     async def get_by_hash(conn: AsyncConnection, key_hash: str) -> Optional[APIKey]:
@@ -80,7 +70,7 @@ class APIKeyRepository:
             This method is deprecated for bcrypt keys since bcrypt hashes
             are non-deterministic. Use list_by_prefix() and verify_api_key() instead.
         """
-        async with conn.cursor() as cursor:
+        async with conn.cursor(row_factory=dict_row) as cursor:
             await cursor.execute(
                 """
                 SELECT id, tenant_id, key_prefix, name, created_at,
@@ -95,17 +85,7 @@ class APIKeyRepository:
             if not row:
                 return None
 
-            return APIKey(
-                id=row[0],
-                tenant_id=row[1],
-                key_prefix=row[2],
-                name=row[3],
-                created_at=row[4],
-                last_used_at=row[5],
-                revoked_at=row[6],
-                rate_limit_per_minute=row[7],
-                is_admin=row[8],
-            )
+            return APIKey.model_validate(row)
 
     @staticmethod
     async def list_by_prefix(
@@ -126,7 +106,7 @@ class APIKeyRepository:
             Returns only active (non-revoked) keys.
             The key_hash is returned for verification but not included in APIKey model.
         """
-        async with conn.cursor() as cursor:
+        async with conn.cursor(row_factory=dict_row) as cursor:
             await cursor.execute(
                 """
                 SELECT id, tenant_id, key_prefix, name, created_at,
@@ -141,18 +121,8 @@ class APIKeyRepository:
 
             return [
                 (
-                    APIKey(
-                        id=row[0],
-                        tenant_id=row[1],
-                        key_prefix=row[2],
-                        name=row[3],
-                        created_at=row[4],
-                        last_used_at=row[5],
-                        revoked_at=row[6],
-                        rate_limit_per_minute=row[7],
-                        is_admin=row[8],
-                    ),
-                    row[9],  # key_hash for verification
+                    APIKey.model_validate(row),
+                    row['key_hash'],
                 )
                 for row in rows
             ]
@@ -169,7 +139,7 @@ class APIKeyRepository:
         Returns:
             List of APIKey objects (may be empty)
         """
-        async with conn.cursor() as cursor:
+        async with conn.cursor(row_factory=dict_row) as cursor:
             await cursor.execute(
                 """
                 SELECT id, tenant_id, key_prefix, name, created_at,
@@ -182,20 +152,7 @@ class APIKeyRepository:
             )
             rows = await cursor.fetchall()
 
-            return [
-                APIKey(
-                    id=row[0],
-                    tenant_id=row[1],
-                    key_prefix=row[2],
-                    name=row[3],
-                    created_at=row[4],
-                    last_used_at=row[5],
-                    revoked_at=row[6],
-                    rate_limit_per_minute=row[7],
-                    is_admin=row[8],
-                )
-                for row in rows
-            ]
+            return [APIKey.model_validate(row) for row in rows]
 
     @staticmethod
     async def update_last_used(conn: AsyncConnection, key_id: UUID) -> None:
@@ -259,7 +216,7 @@ class APIKeyRepository:
         Returns:
             APIKey if found and owned by tenant, None otherwise
         """
-        async with conn.cursor() as cursor:
+        async with conn.cursor(row_factory=dict_row) as cursor:
             await cursor.execute(
                 """
                 SELECT id, tenant_id, key_prefix, name, created_at,
@@ -274,14 +231,4 @@ class APIKeyRepository:
             if not row:
                 return None
 
-            return APIKey(
-                id=row[0],
-                tenant_id=row[1],
-                key_prefix=row[2],
-                name=row[3],
-                created_at=row[4],
-                last_used_at=row[5],
-                revoked_at=row[6],
-                rate_limit_per_minute=row[7],
-                is_admin=row[8],
-            )
+            return APIKey.model_validate(row)

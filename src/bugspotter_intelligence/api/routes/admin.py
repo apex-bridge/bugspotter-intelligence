@@ -59,17 +59,7 @@ async def create_api_key(
     )
 
     return CreateAPIKeyResponse(
-        api_key=APIKeyResponse(
-            id=api_key.id,
-            tenant_id=api_key.tenant_id,
-            key_prefix=api_key.key_prefix,
-            name=api_key.name,
-            created_at=api_key.created_at,
-            last_used_at=api_key.last_used_at,
-            is_active=api_key.is_active,
-            rate_limit_per_minute=api_key.rate_limit_per_minute,
-            is_admin=api_key.is_admin,
-        ),
+        api_key=APIKeyResponse.model_validate(api_key),
         plain_key=plain_key,
     )
 
@@ -89,20 +79,7 @@ async def list_api_keys(
     keys = await service.list_keys(conn, tenant.tenant_id)
 
     return APIKeyListResponse(
-        keys=[
-            APIKeyResponse(
-                id=k.id,
-                tenant_id=k.tenant_id,
-                key_prefix=k.key_prefix,
-                name=k.name,
-                created_at=k.created_at,
-                last_used_at=k.last_used_at,
-                is_active=k.is_active,
-                rate_limit_per_minute=k.rate_limit_per_minute,
-                is_admin=k.is_admin,
-            )
-            for k in keys
-        ],
+        keys=[APIKeyResponse.model_validate(k) for k in keys],
         total=len(keys),
     )
 
@@ -126,17 +103,7 @@ async def get_api_key(
             detail=f"API key {key_id} not found",
         )
 
-    return APIKeyResponse(
-        id=api_key.id,
-        tenant_id=api_key.tenant_id,
-        key_prefix=api_key.key_prefix,
-        name=api_key.name,
-        created_at=api_key.created_at,
-        last_used_at=api_key.last_used_at,
-        is_active=api_key.is_active,
-        rate_limit_per_minute=api_key.rate_limit_per_minute,
-        is_admin=api_key.is_admin,
-    )
+    return APIKeyResponse.model_validate(api_key)
 
 
 @router.delete("/api-keys/{key_id}", status_code=204)

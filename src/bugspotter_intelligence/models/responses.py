@@ -95,6 +95,8 @@ class APIKeyResponse(BaseModel):
     rate_limit_per_minute: int
     is_admin: bool
 
+    model_config = {"from_attributes": True}
+
 
 class CreateAPIKeyResponse(BaseModel):
     """Response after creating API key (includes plain key ONCE)"""

@@ -33,6 +33,12 @@ async def create_api_keys_table(conn: AsyncConnection) -> None:
             ON api_keys(tenant_id)
         """)
 
+        # Index for prefix-based key lookup (used in bcrypt validation flow)
+        await cursor.execute("""
+            CREATE INDEX IF NOT EXISTS api_keys_key_prefix_idx
+            ON api_keys(key_prefix)
+        """)
+
         # Partial index for active keys only
         await cursor.execute("""
             CREATE INDEX IF NOT EXISTS api_keys_active_idx

@@ -49,7 +49,7 @@ def hash_api_key(key: str) -> str:
         with secrets.token_urlsafe(32), using bcrypt ensures defense-in-depth
         and follows security best practices for any credential storage.
     """
-    salt = bcrypt.gensalt()
+    salt = bcrypt.gensalt(rounds=12)
     return bcrypt.hashpw(key.encode(), salt).decode()
 
 

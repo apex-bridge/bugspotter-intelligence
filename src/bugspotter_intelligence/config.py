@@ -13,11 +13,7 @@ class Settings(BaseSettings):
     # === Authentication ===
     auth_enabled: bool = Field(
         default=True,
-        description="Enable API key authentication"
-    )
-    admin_api_key: str | None = Field(
-        default=None,
-        description="Master admin API key (set in env for bootstrapping)"
+        description="Enable API key authentication (set to false for initial setup)"
     )
     api_key_prefix: str = Field(
         default="bsi_",
@@ -47,6 +43,12 @@ class Settings(BaseSettings):
         ge=1,
         le=3600,
         description="Rate limit window in seconds"
+    )
+
+    # === CORS ===
+    cors_allowed_origins: list[str] = Field(
+        default=["http://localhost:3000", "http://localhost:5173"],
+        description="Allowed CORS origins. Use specific domains in production, never '*'"
     )
 
     # === LLM Providers ===
