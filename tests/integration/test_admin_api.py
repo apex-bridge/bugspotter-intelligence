@@ -92,7 +92,6 @@ class TestCreateAPIKey:
         ):
             response = await create_api_key(
                 body=body,
-                request=mock_request,
                 tenant=admin_tenant_context,
                 conn=mock_db_connection,
                 service=mock_api_key_service,
@@ -120,7 +119,6 @@ class TestCreateAPIKey:
         with pytest.raises(HTTPException) as exc_info:
             await create_api_key(
                 body=body,
-                request=mock_request,
                 tenant=admin_tenant_context,
                 conn=mock_db_connection,
                 service=mock_api_key_service,
@@ -146,7 +144,6 @@ class TestCreateAPIKey:
         ):
             response = await create_api_key(
                 body=body,
-                request=mock_request,
                 tenant=admin_tenant_context,
                 conn=mock_db_connection,
                 service=mock_api_key_service,
@@ -173,7 +170,6 @@ class TestListAPIKeys:
             return_value=mock_api_key_service,
         ):
             response = await list_api_keys(
-                request=mock_request,
                 tenant=admin_tenant_context,
                 conn=mock_db_connection,
                 service=mock_api_key_service,
@@ -200,7 +196,6 @@ class TestGetAPIKey:
         ):
             response = await get_api_key(
                 key_id=sample_api_key.id,
-                request=mock_request,
                 tenant=admin_tenant_context,
                 conn=mock_db_connection,
                 service=mock_api_key_service,
@@ -221,7 +216,6 @@ class TestGetAPIKey:
         with pytest.raises(HTTPException) as exc_info:
             await get_api_key(
                 key_id=uuid4(),
-                request=mock_request,
                 tenant=admin_tenant_context,
                 conn=mock_db_connection,
                 service=mock_api_key_service,
@@ -242,7 +236,6 @@ class TestRevokeAPIKey:
 
         result = await revoke_api_key(
             key_id=uuid4(),
-            request=mock_request,
             tenant=admin_tenant_context,
             conn=mock_db_connection,
             service=mock_api_key_service,
@@ -262,7 +255,6 @@ class TestRevokeAPIKey:
         with pytest.raises(HTTPException) as exc_info:
             await revoke_api_key(
                 key_id=uuid4(),
-                request=mock_request,
                 tenant=admin_tenant_context,
                 conn=mock_db_connection,
                 service=mock_api_key_service,

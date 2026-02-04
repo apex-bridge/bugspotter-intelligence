@@ -107,7 +107,7 @@ class CreateAPIKeyRequest(BaseModel):
 
     tenant_id: UUID | None = Field(
         default=None,
-        description="Tenant ID (reserved for future use; currently must match requesting admin's tenant)"
+        description="Optional. If provided, must match your authenticated tenant ID (returns 403 otherwise). The API key will always be created for your authenticated tenant."
     )
 
     rate_limit_per_minute: int = Field(

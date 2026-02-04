@@ -6,14 +6,9 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException, Request
 
+import bugspotter_intelligence.rate_limiting.dependencies as deps
 from bugspotter_intelligence.auth.models import TenantContext
 from bugspotter_intelligence.config import Settings
-from bugspotter_intelligence.rate_limiting.dependencies import (
-    RateLimitResult,
-    check_rate_limit,
-    check_rate_limit_admin,
-    get_rate_limiter,
-)
 from bugspotter_intelligence.rate_limiting.limiter import SlidingWindowRateLimiter
 
 
@@ -78,7 +73,7 @@ class TestCheckRateLimit:
             "bugspotter_intelligence.rate_limiting.dependencies.is_redis_available",
             return_value=True,
         ):
-            result = await check_rate_limit(
+            result = await deps.check_rate_limit(
                 request=mock_request,
                 tenant=mock_tenant,
                 settings=mock_settings,
@@ -101,7 +96,7 @@ class TestCheckRateLimit:
             "bugspotter_intelligence.rate_limiting.dependencies.is_redis_available",
             return_value=True,
         ):
-            await check_rate_limit(
+            await deps.check_rate_limit(
                 request=mock_request,
                 tenant=mock_tenant,
                 settings=mock_settings,
@@ -125,7 +120,7 @@ class TestCheckRateLimit:
             return_value=True,
         ):
             with pytest.raises(HTTPException) as exc_info:
-                await check_rate_limit(
+                await deps.check_rate_limit(
                     request=mock_request,
                     tenant=mock_tenant,
                     settings=mock_settings,
@@ -143,7 +138,7 @@ class TestCheckRateLimit:
         """Should skip rate limiting when disabled in settings"""
         mock_settings.rate_limit_enabled = False
 
-        result = await check_rate_limit(
+        result = await deps.check_rate_limit(
             request=mock_request,
             tenant=mock_tenant,
             settings=mock_settings,
@@ -162,7 +157,7 @@ class TestCheckRateLimit:
             "bugspotter_intelligence.rate_limiting.dependencies.is_redis_available",
             return_value=False,
         ):
-            result = await check_rate_limit(
+            result = await deps.check_rate_limit(
                 request=mock_request,
                 tenant=mock_tenant,
                 settings=mock_settings,
@@ -181,7 +176,7 @@ class TestCheckRateLimit:
             "bugspotter_intelligence.rate_limiting.dependencies.is_redis_available",
             return_value=True,
         ):
-            result = await check_rate_limit(
+            result = await deps.check_rate_limit(
                 request=mock_request,
                 tenant=mock_tenant,
                 settings=mock_settings,
@@ -205,7 +200,7 @@ class TestCheckRateLimitAdmin:
             "bugspotter_intelligence.rate_limiting.dependencies.is_redis_available",
             return_value=True,
         ):
-            result = await check_rate_limit_admin(
+            result = await deps.check_rate_limit_admin(
                 request=mock_request,
                 tenant=mock_admin_tenant,
                 settings=mock_settings,
@@ -226,7 +221,7 @@ class TestCheckRateLimitAdmin:
             return_value=True,
         ):
             with pytest.raises(HTTPException) as exc_info:
-                await check_rate_limit_admin(
+                await deps.check_rate_limit_admin(
                     request=mock_request,
                     tenant=mock_tenant,
                     settings=mock_settings,
@@ -248,7 +243,7 @@ class TestCheckRateLimitAdmin:
             return_value=True,
         ):
             with pytest.raises(HTTPException) as exc_info:
-                await check_rate_limit_admin(
+                await deps.check_rate_limit_admin(
                     request=mock_request,
                     tenant=mock_admin_tenant,
                     settings=mock_settings,
@@ -264,7 +259,7 @@ class TestRateLimitResult:
 
     def test_creation(self):
         """Should create rate limit result with values"""
-        result = RateLimitResult(limit=60, remaining=45, retry_after=0)
+        result = deps.RateLimitResult(limit=60, remaining=45, retry_after=0)
 
         assert result.limit == 60
         assert result.remaining == 45
@@ -272,7 +267,7 @@ class TestRateLimitResult:
 
     def test_default_retry_after(self):
         """Should default retry_after to 0"""
-        result = RateLimitResult(limit=60, remaining=45)
+        result = deps.RateLimitResult(limit=60, remaining=45)
 
         assert result.retry_after == 0
 
@@ -287,10 +282,9 @@ class TestGetRateLimiter:
             return_value=None,
         ):
             # Reset singleton
-            import bugspotter_intelligence.rate_limiting.dependencies as deps
             deps._limiter = None
 
-            result = get_rate_limiter(mock_settings)
+            result = deps.get_rate_limiter(mock_settings)
 
             assert result is None
 
@@ -303,10 +297,9 @@ class TestGetRateLimiter:
             return_value=mock_redis,
         ):
             # Reset singleton
-            import bugspotter_intelligence.rate_limiting.dependencies as deps
             deps._limiter = None
 
-            result = get_rate_limiter(mock_settings)
+            result = deps.get_rate_limiter(mock_settings)
 
             assert result is not None
             assert isinstance(result, SlidingWindowRateLimiter)
@@ -320,10 +313,9 @@ class TestGetRateLimiter:
             return_value=mock_redis,
         ):
             # Reset singleton
-            import bugspotter_intelligence.rate_limiting.dependencies as deps
             deps._limiter = None
 
-            result1 = get_rate_limiter(mock_settings)
-            result2 = get_rate_limiter(mock_settings)
+            result1 = deps.get_rate_limiter(mock_settings)
+            result2 = deps.get_rate_limiter(mock_settings)
 
             assert result1 is result2
