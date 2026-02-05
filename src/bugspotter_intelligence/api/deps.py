@@ -1,5 +1,7 @@
 """FastAPI dependency injection"""
 
+import logging
+
 from fastapi import Depends
 
 from bugspotter_intelligence.config import Settings
@@ -10,6 +12,7 @@ from bugspotter_intelligence.services import BugCommandService, BugQueryService,
 from bugspotter_intelligence.services.embeddings import EmbeddingProvider, LocalEmbeddingProvider
 from bugspotter_intelligence.services.reranker import LLMReranker
 
+logger = logging.getLogger(__name__)
 
 # Global singletons
 _settings: Settings | None = None
@@ -76,6 +79,10 @@ def get_reranker(
             timeout_seconds=settings.smart_search_timeout,
         )
     except Exception:
+        logger.warning(
+            "Failed to initialize LLM reranker, smart search will be disabled",
+            exc_info=True,
+        )
         return None
 
 
