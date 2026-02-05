@@ -22,6 +22,28 @@ class CacheService:
 
     Graceful degradation: all methods are no-ops when Redis is unavailable.
     Uses tenant invalidation timestamps for O(1) cache invalidation.
+
+    Consistency Model:
+    ------------------
+    This cache implements **eventual consistency** with a post-commit invalidation
+    pattern. When data is modified (e.g., new bug inserted, status updated):
+
+    1. Database transaction commits first
+    2. Cache invalidation occurs after commit
+
+    This creates a small window where concurrent read requests may receive cached
+    results that don't reflect the latest changes. This is acceptable for this
+    use case because:
+
+    - Bug tracking doesn't require strict consistency (not financial data)
+    - Stale results (missing recent bugs) are tolerable for brief periods
+    - Cache TTLs ensure eventual consistency (typical: 5-15 minutes)
+    - The alternative (pre-invalidate + re-populate) adds complexity and latency
+
+    Alternative Pattern (if stricter consistency needed):
+    - Invalidate BEFORE database commit
+    - Re-populate cache AFTER commit
+    - Trade-off: Higher latency, risk of cache misses if commit fails
     """
 
     def __init__(self):
