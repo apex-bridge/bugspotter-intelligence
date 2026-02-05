@@ -131,8 +131,8 @@ class LLMReranker:
         text = raw.strip()
 
         # Use regex to find JSON array patterns (more robust than simple find/rfind)
-        # Pattern matches: [ followed by numbers/dots/commas/whitespace, then ]
-        array_pattern = r'\[[\d\.,\s]+\]'
+        # Pattern matches: [ ... ] allowing any content (numbers, negatives, strings, etc.)
+        array_pattern = r'\[[^\[\]]*\]'
         matches = re.findall(array_pattern, text)
 
         if not matches:
