@@ -11,20 +11,24 @@ class CacheKeyBuilder:
     SEARCH_FAST_NS = "search:fast"
     SEARCH_SMART_NS = "search:smart"
     EMBEDDING_NS = "embed"
-    TENANT_VERSION_NS = "tenant:ver"
+    TENANT_VERSION_NS = "tenant:ts"
 
     @staticmethod
-    def search_key(tenant_id: UUID, query_hash: str, mode: str, version: int = 0) -> str:
+    def search_key(tenant_id: UUID, query_hash: str, mode: str, token: int = 0) -> str:
         """
         Build cache key for search results.
 
-        Format: search:{mode}:{tenant_id}:v{version}:{query_hash}
+        Format: search:{mode}:{tenant_id}:t{token}:{query_hash}
 
-        The version component ensures old cached entries are ignored
+        The token component ensures old cached entries are ignored
         after tenant data changes (new bug submitted, etc.).
         """
-        ns = CacheKeyBuilder.SEARCH_SMART_NS if mode == "smart" else CacheKeyBuilder.SEARCH_FAST_NS
-        return f"{ns}:{tenant_id}:v{version}:{query_hash}"
+        ns = (
+            CacheKeyBuilder.SEARCH_SMART_NS
+            if mode == "smart"
+            else CacheKeyBuilder.SEARCH_FAST_NS
+        )
+        return f"{ns}:{tenant_id}:t{token}:{query_hash}"
 
     @staticmethod
     def embedding_key(text_hash: str) -> str:
@@ -38,9 +42,9 @@ class CacheKeyBuilder:
     @staticmethod
     def tenant_version_key(tenant_id: UUID) -> str:
         """
-        Build key for tenant version counter.
+        Build key for tenant invalidation timestamp.
 
-        Format: tenant:ver:{tenant_id}
+        Format: tenant:ts:{tenant_id}
         """
         return f"{CacheKeyBuilder.TENANT_VERSION_NS}:{tenant_id}"
 

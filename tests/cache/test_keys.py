@@ -24,15 +24,15 @@ class TestSearchKey:
 
         assert str(tid) in key
 
-    def test_includes_version(self):
-        """Should include version in key"""
+    def test_includes_token(self):
+        """Should include invalidation token in key"""
         tid = uuid4()
-        key_v0 = CacheKeyBuilder.search_key(tid, "abc123", mode="fast", version=0)
-        key_v5 = CacheKeyBuilder.search_key(tid, "abc123", mode="fast", version=5)
+        key_t0 = CacheKeyBuilder.search_key(tid, "abc123", mode="fast", token=0)
+        key_t5 = CacheKeyBuilder.search_key(tid, "abc123", mode="fast", token=5)
 
-        assert ":v0:" in key_v0
-        assert ":v5:" in key_v5
-        assert key_v0 != key_v5
+        assert ":t0:" in key_t0
+        assert ":t5:" in key_t5
+        assert key_t0 != key_t5
 
     def test_different_tenants_produce_different_keys(self):
         """Should produce different keys for different tenants"""
@@ -44,8 +44,8 @@ class TestSearchKey:
     def test_same_inputs_produce_same_key(self):
         """Should produce deterministic keys"""
         tid = uuid4()
-        key1 = CacheKeyBuilder.search_key(tid, "abc123", mode="fast", version=1)
-        key2 = CacheKeyBuilder.search_key(tid, "abc123", mode="fast", version=1)
+        key1 = CacheKeyBuilder.search_key(tid, "abc123", mode="fast", token=1)
+        key2 = CacheKeyBuilder.search_key(tid, "abc123", mode="fast", token=1)
 
         assert key1 == key2
 
@@ -70,11 +70,11 @@ class TestTenantVersionKey:
     """Tests for CacheKeyBuilder.tenant_version_key"""
 
     def test_uses_tenant_version_namespace(self):
-        """Should use tenant:ver namespace"""
+        """Should use tenant:ts namespace"""
         tid = uuid4()
         key = CacheKeyBuilder.tenant_version_key(tid)
 
-        assert key.startswith("tenant:ver:")
+        assert key.startswith("tenant:ts:")
         assert str(tid) in key
 
 

@@ -100,9 +100,15 @@ class LLMReranker:
 
             parts = [f"Candidate {i}: [{status}] {title}"]
             if desc:
-                parts.append(f"  Description: {desc[:200]}")
+                truncated_desc = desc[:200]
+                if len(desc) > 200:
+                    truncated_desc += "..."
+                parts.append(f"  Description: {truncated_desc}")
             if resolution:
-                parts.append(f"  Resolution: {resolution[:100]}")
+                truncated_res = resolution[:100]
+                if len(resolution) > 100:
+                    truncated_res += "..."
+                parts.append(f"  Resolution: {truncated_res}")
             lines.append("\n".join(parts))
 
         candidates_text = "\n\n".join(lines)

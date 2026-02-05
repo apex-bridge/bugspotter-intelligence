@@ -139,9 +139,7 @@ class TestSearchFast:
             new_callable=AsyncMock,
             return_value=([], 0),
         ) as mock_search:
-            await search_service.search_fast(
-                mock_db_connection, "query", tenant_id=tid
-            )
+            await search_service.search_fast(mock_db_connection, "query", tenant_id=tid)
 
         call_kwargs = mock_search.call_args.kwargs
         assert call_kwargs["tenant_id"] == tid
@@ -232,9 +230,7 @@ class TestSearchFast:
             new_callable=AsyncMock,
             return_value=([], 0),
         ) as mock_search:
-            await search_service.search_fast(
-                mock_db_connection, "query", tenant_id=tid
-            )
+            await search_service.search_fast(mock_db_connection, "query", tenant_id=tid)
 
         call_kwargs = mock_search.call_args.kwargs
         assert call_kwargs["limit"] == 10
@@ -250,9 +246,7 @@ class TestSearchFast:
             new_callable=AsyncMock,
             return_value=([], 0),
         ) as mock_search:
-            await search_service.search_fast(
-                mock_db_connection, "query", tenant_id=tid
-            )
+            await search_service.search_fast(mock_db_connection, "query", tenant_id=tid)
 
         call_kwargs = mock_search.call_args.kwargs
         assert call_kwargs["status"] is None
@@ -374,8 +368,7 @@ class TestSearchSmart:
         """Should apply offset/limit pagination to reranked results"""
         tid = uuid4()
         reranked = [
-            {"bug_id": f"bug-{i}", "similarity": 0.9 - i * 0.1}
-            for i in range(10)
+            {"bug_id": f"bug-{i}", "similarity": 0.9 - i * 0.1} for i in range(10)
         ]
         mock_reranker.rerank = AsyncMock(return_value=(reranked, True))
 
@@ -509,10 +502,10 @@ class TestSearchCacheIntegration:
         assert result["cached"] is False
 
     @pytest.mark.asyncio
-    async def test_cache_uses_tenant_version(
+    async def test_cache_uses_tenant_token(
         self, cached_search_service, mock_cache_service, mock_db_connection
     ):
-        """Should include tenant version in cache key lookup"""
+        """Should include tenant token in cache key lookup"""
         tid = uuid4()
         mock_cache_service.get = AsyncMock(return_value=None)
         mock_cache_service.get_tenant_version = AsyncMock(return_value=3)
@@ -528,3 +521,10 @@ class TestSearchCacheIntegration:
 
         # Should have called get_tenant_version for both get and set
         assert mock_cache_service.get_tenant_version.call_count == 2
+
+        get_key = mock_cache_service.get.call_args.args[0]
+        set_key = mock_cache_service.set.call_args.args[0]
+        assert f":t3:" in get_key
+        assert f":t3:" in set_key
+        assert str(tid) in get_key
+        assert str(tid) in set_key

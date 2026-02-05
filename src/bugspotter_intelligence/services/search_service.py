@@ -74,7 +74,9 @@ class SearchService:
         logger.debug(f"Fast search: query={query!r}, tenant={tenant_id}")
 
         # Check cache
-        cached = await self._cache_get(query, tenant_id, "fast", limit, offset, status, date_from, date_to)
+        cached = await self._cache_get(
+            query, tenant_id, "fast", limit, offset, status, date_from, date_to
+        )
         if cached is not None:
             cached["cached"] = True
             return cached
@@ -103,7 +105,9 @@ class SearchService:
         }
 
         # Populate cache
-        await self._cache_set(query, tenant_id, "fast", limit, offset, status, date_from, date_to, result)
+        await self._cache_set(
+            query, tenant_id, "fast", limit, offset, status, date_from, date_to, result
+        )
 
         return result
 
@@ -156,7 +160,9 @@ class SearchService:
         logger.debug(f"Smart search: query={query!r}, tenant={tenant_id}")
 
         # Check cache
-        cached = await self._cache_get(query, tenant_id, "smart", limit, offset, status, date_from, date_to)
+        cached = await self._cache_get(
+            query, tenant_id, "smart", limit, offset, status, date_from, date_to
+        )
         if cached is not None:
             cached["cached"] = True
             return cached
@@ -180,7 +186,7 @@ class SearchService:
         )
 
         # Apply pagination to reranked results
-        paginated = reranked[offset:offset + limit]
+        paginated = reranked[offset : offset + limit]
 
         result = {
             "results": paginated,
@@ -194,7 +200,17 @@ class SearchService:
 
         # Only cache if LLM was actually used (not a fallback)
         if llm_used:
-            await self._cache_set(query, tenant_id, "smart", limit, offset, status, date_from, date_to, result)
+            await self._cache_set(
+                query,
+                tenant_id,
+                "smart",
+                limit,
+                offset,
+                status,
+                date_from,
+                date_to,
+                result,
+            )
 
         return result
 
@@ -213,10 +229,10 @@ class SearchService:
         if self.cache is None:
             return None
 
-        version = await self.cache.get_tenant_version(tenant_id)
+        token = await self.cache.get_tenant_version(tenant_id)
         filters = self._build_filter_dict(status, date_from, date_to, limit, offset)
         query_hash = CacheKeyBuilder.hash_query(query, filters)
-        key = CacheKeyBuilder.search_key(tenant_id, query_hash, mode, version)
+        key = CacheKeyBuilder.search_key(tenant_id, query_hash, mode, token)
 
         return await self.cache.get(key)
 
@@ -236,18 +252,17 @@ class SearchService:
         if self.cache is None:
             return
 
-        version = await self.cache.get_tenant_version(tenant_id)
+        token = await self.cache.get_tenant_version(tenant_id)
         filters = self._build_filter_dict(status, date_from, date_to, limit, offset)
         query_hash = CacheKeyBuilder.hash_query(query, filters)
-        key = CacheKeyBuilder.search_key(tenant_id, query_hash, mode, version)
+        key = CacheKeyBuilder.search_key(tenant_id, query_hash, mode, token)
 
         ttl = self.cache_ttl_smart if mode == "smart" else self.cache_ttl_fast
 
         # Convert datetime objects for JSON serialization
         serializable = result.copy()
         serializable["results"] = [
-            {**r, "created_at": r["created_at"].isoformat()}
-            for r in result["results"]
+            {**r, "created_at": r["created_at"].isoformat()} for r in result["results"]
         ]
 
         await self.cache.set(key, serializable, ttl_seconds=ttl)

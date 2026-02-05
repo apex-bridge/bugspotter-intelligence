@@ -2,10 +2,15 @@
 
 import json
 import logging
+import time
 from typing import Any
 from uuid import UUID
 
-from bugspotter_intelligence.rate_limiting.redis_client import get_redis, is_redis_available
+from bugspotter_intelligence.rate_limiting.redis_client import (
+    get_redis,
+    is_redis_available,
+)
+
 from .keys import CacheKeyBuilder
 
 logger = logging.getLogger(__name__)
@@ -16,7 +21,7 @@ class CacheService:
     Caching service built on the existing Redis client.
 
     Graceful degradation: all methods are no-ops when Redis is unavailable.
-    Uses tenant version counters for O(1) cache invalidation.
+    Uses tenant invalidation timestamps for O(1) cache invalidation.
     """
 
     def __init__(self):
@@ -79,9 +84,9 @@ class CacheService:
 
     async def invalidate_tenant(self, tenant_id: UUID) -> None:
         """
-        Increment tenant version counter.
+        Update tenant invalidation timestamp.
 
-        O(1) operation. Old cache entries with the previous version
+        O(1) operation. Old cache entries with the previous token
         will never be accessed and expire via TTL naturally.
         """
         if not self.available:
@@ -89,27 +94,27 @@ class CacheService:
 
         try:
             key = CacheKeyBuilder.tenant_version_key(tenant_id)
-            await self._redis.incr(key)
+            timestamp_ms = time.time_ns() // 1_000_000
+            await self._redis.set(key, timestamp_ms)
         except Exception as e:
             logger.debug(f"Cache invalidation failed for tenant {tenant_id}: {e}")
 
     async def get_tenant_version(self, tenant_id: UUID) -> int:
         """
-        Get current tenant version.
+        Get current tenant invalidation token.
 
-        Returns 0 if no version set or Redis is unavailable.
+        Returns 0 if no token set or Redis is unavailable.
         """
         if not self.available:
             return 0
 
         try:
             key = CacheKeyBuilder.tenant_version_key(tenant_id)
-            version = await self._redis.get(key)
-            return int(version) if version is not None else 0
+            token = await self._redis.get(key)
+            return int(token) if token is not None else 0
         except Exception as e:
-            logger.debug(f"Failed to get tenant version for {tenant_id}: {e}")
+            logger.debug(f"Failed to get tenant token for {tenant_id}: {e}")
             return 0
-
 
     async def get_stats(self) -> dict:
         """
