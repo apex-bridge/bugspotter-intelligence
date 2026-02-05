@@ -244,12 +244,9 @@ class SearchService:
         ttl = self.cache_ttl_smart if mode == "smart" else self.cache_ttl_fast
 
         # Convert datetime objects for JSON serialization
-        serializable = dict(result)
+        serializable = result.copy()
         serializable["results"] = [
-            {
-                **r,
-                "created_at": r["created_at"].isoformat() if isinstance(r.get("created_at"), datetime) else r.get("created_at"),
-            }
+            {**r, "created_at": r["created_at"].isoformat()}
             for r in result["results"]
         ]
 

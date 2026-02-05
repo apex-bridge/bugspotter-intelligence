@@ -142,7 +142,7 @@ class CacheService:
         except Exception as e:
             logger.debug(f"Failed to get cache stats: {e}")
             return {
-                "available": True,
+                "available": False,
                 "keyspace_hits": 0,
                 "keyspace_misses": 0,
                 "hit_rate": 0.0,

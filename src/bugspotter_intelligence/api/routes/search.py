@@ -29,14 +29,9 @@ async def search_bugs(
 
     Supports filtering by status and date range, with pagination.
     """
-    search_kwargs = dict(
-        tenant_id=tenant.tenant_id,
-        limit=body.limit,
-        offset=body.offset,
-        status=body.status,
-        date_from=body.date_from,
-        date_to=body.date_to,
-    )
+    # Extract all filter parameters from request body
+    search_kwargs = body.model_dump(exclude={'query', 'mode'})
+    search_kwargs['tenant_id'] = tenant.tenant_id
 
     if body.mode == "smart":
         result = await service.search_smart(conn, body.query, **search_kwargs)
