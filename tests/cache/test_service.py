@@ -1,11 +1,10 @@
 """Tests for cache service"""
 
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
-import bugspotter_intelligence.cache.service as cache_module
 from bugspotter_intelligence.cache.service import CacheService, get_cache_service
 
 
@@ -429,13 +428,13 @@ class TestGetCacheServiceSingleton:
 
     def test_returns_cache_service_instance(self):
         """Should return a CacheService instance"""
-        cache_module._cache_service = None
-        result = get_cache_service()
+        with patch("bugspotter_intelligence.cache.service._cache_service", None):
+            result = get_cache_service()
         assert isinstance(result, CacheService)
 
     def test_returns_singleton(self):
         """Should return same instance on subsequent calls"""
-        cache_module._cache_service = None
-        result1 = get_cache_service()
-        result2 = get_cache_service()
+        with patch("bugspotter_intelligence.cache.service._cache_service", None):
+            result1 = get_cache_service()
+            result2 = get_cache_service()
         assert result1 is result2

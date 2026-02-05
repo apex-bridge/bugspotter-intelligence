@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 import re
-from typing import Optional
 
 from bugspotter_intelligence.llm import LLMProvider
 
@@ -86,7 +85,9 @@ class LLMReranker:
             return candidates[:return_limit], False
 
         except Exception as e:
-            logger.warning(f"LLM reranking failed: {e}, falling back to original ordering")
+            logger.warning(
+                f"LLM reranking failed: {e}, falling back to original ordering"
+            )
             return candidates[:return_limit], False
 
     def _build_prompt(self, query: str, candidates: list[dict]) -> str:
@@ -132,7 +133,7 @@ class LLMReranker:
 
         # Use regex to find JSON array patterns (more robust than simple find/rfind)
         # Pattern matches: [ ... ] allowing any content (numbers, negatives, strings, etc.)
-        array_pattern = r'\[[^\[\]]*\]'
+        array_pattern = r"\[[^\[\]]*\]"
         matches = re.findall(array_pattern, text)
 
         if not matches:

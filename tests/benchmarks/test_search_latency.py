@@ -5,8 +5,6 @@ These tests require a running PostgreSQL+pgvector database with test data.
 Run with: pytest tests/benchmarks/ -m slow -v
 """
 
-import time
-
 import pytest
 
 slow = pytest.mark.slow

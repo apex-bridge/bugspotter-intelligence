@@ -293,9 +293,31 @@ class TestSearchSmart:
                 mock_db_connection, "query", tenant_id=tid, limit=5
             )
 
-        # Should fetch 20 candidates (smart_candidate_limit), not 5
+        # Should fetch 20 candidates (smart_candidate_limit) when offset+limit < smart_candidate_limit
         call_kwargs = mock_search.call_args.kwargs
         assert call_kwargs["limit"] == 20
+
+    @pytest.mark.asyncio
+    async def test_fetches_enough_candidates_for_large_offset(
+        self, smart_search_service, mock_reranker, mock_db_connection
+    ):
+        """Should fetch enough candidates to cover offset + limit when it exceeds smart_candidate_limit"""
+        tid = uuid4()
+        mock_reranker.rerank = AsyncMock(return_value=([], True))
+
+        with patch(
+            "bugspotter_intelligence.services.search_service.BugRepository.search",
+            new_callable=AsyncMock,
+            return_value=([], 0),
+        ) as mock_search:
+            # offset=15, limit=10 -> needs 25 total, but smart_candidate_limit=20
+            await smart_search_service.search_smart(
+                mock_db_connection, "query", tenant_id=tid, limit=10, offset=15
+            )
+
+        # Should fetch 25 candidates to ensure pagination works
+        call_kwargs = mock_search.call_args.kwargs
+        assert call_kwargs["limit"] == 25
 
     @pytest.mark.asyncio
     async def test_passes_candidates_to_reranker(

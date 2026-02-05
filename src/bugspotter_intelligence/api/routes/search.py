@@ -1,6 +1,6 @@
 """Search endpoint for natural language bug search"""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from psycopg import AsyncConnection
 
 from bugspotter_intelligence.api.deps import get_db_connection, get_search_service
@@ -30,8 +30,8 @@ async def search_bugs(
     Supports filtering by status and date range, with pagination.
     """
     # Extract all filter parameters from request body
-    search_kwargs = body.model_dump(exclude={'query', 'mode'})
-    search_kwargs['tenant_id'] = tenant.tenant_id
+    search_kwargs = body.model_dump(exclude={"query", "mode"})
+    search_kwargs["tenant_id"] = tenant.tenant_id
 
     if body.mode == "smart":
         result = await service.search_smart(conn, body.query, **search_kwargs)

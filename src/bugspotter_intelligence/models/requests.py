@@ -5,6 +5,11 @@ from uuid import UUID
 from pydantic import BaseModel, Field, field_validator
 
 
+def normalize_status_value(v: str | None) -> str | None:
+    """Normalize status to lowercase for case-insensitive input"""
+    return v.lower() if isinstance(v, str) else v
+
+
 class AskRequest(BaseModel):
     """Request model for /ask endpoint"""
 
@@ -13,27 +18,24 @@ class AskRequest(BaseModel):
         min_length=1,
         max_length=1000,
         description="The question to ask the AI",
-        examples=["What causes null pointer exceptions?"]
+        examples=["What causes null pointer exceptions?"],
     )
 
     context: list[str] | None = Field(
         default=None,
         description="Optional context strings (e.g., similar bug descriptions)",
-        examples=[["Bug #1: App crashes on login", "Bug #2: Null pointer in auth"]]
+        examples=[["Bug #1: App crashes on login", "Bug #2: Null pointer in auth"]],
     )
 
     temperature: float = Field(
         default=0.7,
         ge=0.0,
         le=1.0,
-        description="Randomness of response (0.0 = deterministic, 1.0 = creative)"
+        description="Randomness of response (0.0 = deterministic, 1.0 = creative)",
     )
 
     max_tokens: int = Field(
-        default=500,
-        ge=10,
-        le=2000,
-        description="Maximum length of response"
+        default=500, ge=10, le=2000, description="Maximum length of response"
     )
 
 
@@ -45,7 +47,7 @@ class AnalyzeBugRequest(BaseModel):
         min_length=1,
         max_length=100,
         description="Unique bug identifier from main BugSpotter app",
-        examples=["bug-12345"]
+        examples=["bug-12345"],
     )
 
     title: str = Field(
@@ -53,28 +55,23 @@ class AnalyzeBugRequest(BaseModel):
         min_length=1,
         max_length=500,
         description="Bug title/summary",
-        examples=["Login crashes with null pointer"]
+        examples=["Login crashes with null pointer"],
     )
 
     description: str | None = Field(
-        default=None,
-        max_length=5000,
-        description="Detailed bug description"
+        default=None, max_length=5000, description="Detailed bug description"
     )
 
     console_logs: list[dict] | None = Field(
-        default=None,
-        description="Browser console logs"
+        default=None, description="Browser console logs"
     )
 
     network_logs: list[dict] | None = Field(
-        default=None,
-        description="Network request logs"
+        default=None, description="Network request logs"
     )
 
     metadata: dict | None = Field(
-        default=None,
-        description="Environment metadata (browser, OS, etc.)"
+        default=None, description="Environment metadata (browser, OS, etc.)"
     )
 
 
@@ -86,20 +83,19 @@ class UpdateResolutionRequest(BaseModel):
         min_length=1,
         max_length=5000,
         description="How the bug was fixed",
-        examples=["Added null check in AuthService.java:42"]
+        examples=["Added null check in AuthService.java:42"],
     )
 
     status: str = Field(
         default="resolved",
         pattern="^(resolved|closed|wont_fix)$",
-        description="New bug status"
+        description="New bug status",
     )
 
     @field_validator("status", mode="before")
     @classmethod
     def normalize_status(cls, v: str | None) -> str | None:
-        """Normalize status to lowercase for case-insensitive input"""
-        return v.lower() if isinstance(v, str) else v
+        return normalize_status_value(v)
 
 
 class CreateAPIKeyRequest(BaseModel):
@@ -110,24 +106,20 @@ class CreateAPIKeyRequest(BaseModel):
         min_length=1,
         max_length=100,
         description="Human-readable name for the key",
-        examples=["Production API Key", "Development Key"]
+        examples=["Production API Key", "Development Key"],
     )
 
     tenant_id: UUID | None = Field(
         default=None,
-        description="Optional. If provided, must match your authenticated tenant ID (returns 403 otherwise). The API key will always be created for your authenticated tenant."
+        description="Optional. If provided, must match your authenticated tenant ID (returns 403 otherwise). The API key will always be created for your authenticated tenant.",
     )
 
     rate_limit_per_minute: int = Field(
-        default=60,
-        ge=1,
-        le=10000,
-        description="Requests per minute limit for this key"
+        default=60, ge=1, le=10000, description="Requests per minute limit for this key"
     )
 
     is_admin: bool = Field(
-        default=False,
-        description="Whether this key has admin privileges"
+        default=False, description="Whether this key has admin privileges"
     )
 
 
@@ -139,45 +131,35 @@ class SearchRequest(BaseModel):
         min_length=1,
         max_length=1000,
         description="Natural language search query",
-        examples=["login page crash on mobile"]
+        examples=["login page crash on mobile"],
     )
 
     mode: Literal["fast", "smart"] = Field(
         default="fast",
-        description="Search mode: fast (vector similarity) or smart (LLM reranked)"
+        description="Search mode: fast (vector similarity) or smart (LLM reranked)",
     )
 
     limit: int = Field(
-        default=10,
-        ge=1,
-        le=100,
-        description="Maximum number of results to return"
+        default=10, ge=1, le=100, description="Maximum number of results to return"
     )
 
-    offset: int = Field(
-        default=0,
-        ge=0,
-        description="Pagination offset"
-    )
+    offset: int = Field(default=0, ge=0, description="Pagination offset")
 
     status: str | None = Field(
         default=None,
         pattern="^(open|resolved|closed|wont_fix|duplicate)$",
-        description="Filter by bug status"
+        description="Filter by bug status",
     )
 
     date_from: datetime | None = Field(
-        default=None,
-        description="Filter: bugs created on or after this date"
+        default=None, description="Filter: bugs created on or after this date"
     )
 
     @field_validator("status", mode="before")
     @classmethod
     def normalize_status(cls, v: str | None) -> str | None:
-        """Normalize status to lowercase for case-insensitive input"""
-        return v.lower() if isinstance(v, str) else v
+        return normalize_status_value(v)
 
     date_to: datetime | None = Field(
-        default=None,
-        description="Filter: bugs created on or before this date"
+        default=None, description="Filter: bugs created on or before this date"
     )

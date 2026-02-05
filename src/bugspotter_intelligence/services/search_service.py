@@ -167,13 +167,18 @@ class SearchService:
             cached["cached"] = True
             return cached
 
-        # Fetch larger candidate set (bypass cache for internal fast search)
+        # Fetch enough candidates to cover pagination
+        # Use max(smart_candidate_limit, offset + limit) to ensure we have
+        # enough results for the requested page, while still limiting candidates
+        # for small offsets (improves reranking quality vs cost tradeoff)
+        candidate_limit = max(self.smart_candidate_limit, offset + limit)
+
         embedding = self.embedding_provider.embed(query)
         candidates, total = await BugRepository.search(
             conn,
             embedding,
             tenant_id=tenant_id,
-            limit=self.smart_candidate_limit,
+            limit=candidate_limit,
             offset=0,
             status=status,
             date_from=date_from,
