@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def normalize_status_value(v: str | None) -> str | None:
@@ -155,11 +155,18 @@ class SearchRequest(BaseModel):
         default=None, description="Filter: bugs created on or after this date"
     )
 
+    date_to: datetime | None = Field(
+        default=None, description="Filter: bugs created on or before this date"
+    )
+
     @field_validator("status", mode="before")
     @classmethod
     def normalize_status(cls, v: str | None) -> str | None:
         return normalize_status_value(v)
 
-    date_to: datetime | None = Field(
-        default=None, description="Filter: bugs created on or before this date"
-    )
+    @model_validator(mode="after")
+    def check_date_range(self) -> "SearchRequest":
+        """Ensure date_from is not greater than date_to"""
+        if self.date_from and self.date_to and self.date_from > self.date_to:
+            raise ValueError("date_from must be less than or equal to date_to")
+        return self

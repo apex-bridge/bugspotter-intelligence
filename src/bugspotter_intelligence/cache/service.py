@@ -49,6 +49,9 @@ class CacheService:
             if raw is None:
                 return None
             return json.loads(raw)
+        except json.JSONDecodeError as e:
+            logger.warning(f"Corrupt cache data for {key}: {e}")
+            return None
         except Exception as e:
             logger.debug(f"Cache get failed for {key}: {e}")
             return None
@@ -66,6 +69,9 @@ class CacheService:
             raw = json.dumps(value)
             await self._redis.set(key, raw, ex=ttl_seconds)
             return True
+        except (TypeError, ValueError) as e:
+            logger.warning(f"Cannot serialize value for {key}: {e}")
+            return False
         except Exception as e:
             logger.debug(f"Cache set failed for {key}: {e}")
             return False
@@ -88,6 +94,9 @@ class CacheService:
 
         O(1) operation. Old cache entries with the previous token
         will never be accessed and expire via TTL naturally.
+
+        Sets a 30-day TTL on the timestamp key to allow cleanup of
+        inactive tenants while maintaining invalidation for active ones.
         """
         if not self.available:
             return
@@ -95,7 +104,8 @@ class CacheService:
         try:
             key = CacheKeyBuilder.tenant_version_key(tenant_id)
             timestamp_ms = time.time_ns() // 1_000_000
-            await self._redis.set(key, timestamp_ms)
+            # Set 30-day TTL to prevent unbounded memory growth from inactive tenants
+            await self._redis.set(key, timestamp_ms, ex=30 * 24 * 60 * 60)
         except Exception as e:
             logger.debug(f"Cache invalidation failed for tenant {tenant_id}: {e}")
 
@@ -120,8 +130,11 @@ class CacheService:
         """
         Get cache statistics from Redis.
 
-        Returns hit/miss counts and hit rate from Redis INFO stats.
+        Returns global (system-wide) hit/miss counts and hit rate from Redis INFO stats.
+        These metrics are aggregated across all tenants and all cache operations.
         Returns zeroes if Redis is unavailable.
+
+        Note: Not tenant-specific. Use for overall system monitoring.
         """
         if not self.available:
             return {

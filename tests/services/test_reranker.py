@@ -248,7 +248,7 @@ class TestBuildPrompt:
         assert "Fixed SMTP config" in prompt
 
     def test_truncates_long_descriptions(self, reranker):
-        """Should truncate descriptions longer than 200 chars"""
+        """Should truncate descriptions longer than 200 chars and add ellipsis"""
         candidates = [
             {
                 "title": "Bug",
@@ -258,6 +258,21 @@ class TestBuildPrompt:
             }
         ]
         prompt = reranker._build_prompt("query", candidates)
-        # Description should be truncated to 200 chars
-        assert "x" * 200 in prompt
+        # Description should be truncated to 200 chars with ellipsis
+        assert ("x" * 200 + "...") in prompt
         assert "x" * 201 not in prompt
+
+    def test_truncates_long_resolutions(self, reranker):
+        """Should truncate resolutions longer than 100 chars and add ellipsis"""
+        candidates = [
+            {
+                "title": "Bug",
+                "description": "Short description",
+                "status": "resolved",
+                "resolution": "y" * 200,
+            }
+        ]
+        prompt = reranker._build_prompt("query", candidates)
+        # Resolution should be truncated to 100 chars with ellipsis
+        assert ("y" * 100 + "...") in prompt
+        assert "y" * 101 not in prompt

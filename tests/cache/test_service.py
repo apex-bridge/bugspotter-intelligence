@@ -204,7 +204,7 @@ class TestCacheServiceInvalidateTenant:
 
     @pytest.mark.asyncio
     async def test_sets_timestamp_token(self, cache_service, mock_redis):
-        """Should set the tenant invalidation timestamp"""
+        """Should set the tenant invalidation timestamp with 30-day TTL"""
         tid = uuid4()
         time_ns = 1_700_000_000_123_000_000
         expected_ms = 1_700_000_000_123
@@ -225,7 +225,9 @@ class TestCacheServiceInvalidateTenant:
         ):
             await cache_service.invalidate_tenant(tid)
 
-        mock_redis.set.assert_called_once_with(f"tenant:ts:{tid}", expected_ms)
+        mock_redis.set.assert_called_once_with(
+            f"tenant:ts:{tid}", expected_ms, ex=30 * 24 * 60 * 60
+        )
 
     @pytest.mark.asyncio
     async def test_no_op_when_redis_unavailable(self):

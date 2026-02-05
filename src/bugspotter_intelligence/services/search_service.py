@@ -1,5 +1,6 @@
 """Search service for natural language bug search"""
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
@@ -81,7 +82,7 @@ class SearchService:
             cached["cached"] = True
             return cached
 
-        embedding = self.embedding_provider.embed(query)
+        embedding = await asyncio.to_thread(self.embedding_provider.embed, query)
 
         results, total = await BugRepository.search(
             conn,
@@ -173,7 +174,7 @@ class SearchService:
         # for small offsets (improves reranking quality vs cost tradeoff)
         candidate_limit = max(self.smart_candidate_limit, offset + limit)
 
-        embedding = self.embedding_provider.embed(query)
+        embedding = await asyncio.to_thread(self.embedding_provider.embed, query)
         candidates, total = await BugRepository.search(
             conn,
             embedding,
@@ -267,7 +268,15 @@ class SearchService:
         # Convert datetime objects for JSON serialization
         serializable = result.copy()
         serializable["results"] = [
-            {**r, "created_at": r["created_at"].isoformat()} for r in result["results"]
+            {
+                **r,
+                "created_at": (
+                    r["created_at"].isoformat()
+                    if isinstance(r.get("created_at"), datetime)
+                    else r.get("created_at")
+                ),
+            }
+            for r in result["results"]
         ]
 
         await self.cache.set(key, serializable, ttl_seconds=ttl)
