@@ -71,25 +71,18 @@ def get_bug_query_service(
 def get_reranker(
     settings: Settings = Depends(get_settings),
     llm_provider: LLMProvider = Depends(get_llm_provider),
-) -> LLMReranker | None:
-    """Get LLMReranker instance, or None if LLM is unavailable"""
-    try:
-        return LLMReranker(
-            llm_provider,
-            timeout_seconds=settings.smart_search_timeout,
-        )
-    except Exception:
-        logger.warning(
-            "Failed to initialize LLM reranker, smart search will be disabled",
-            exc_info=True,
-        )
-        return None
+) -> LLMReranker:
+    """Get LLMReranker instance"""
+    return LLMReranker(
+        llm_provider,
+        timeout_seconds=settings.smart_search_timeout,
+    )
 
 
 def get_search_service(
     settings: Settings = Depends(get_settings),
     embedding_provider: EmbeddingProvider = Depends(get_embedding_provider),
-    reranker: LLMReranker | None = Depends(get_reranker),
+    reranker: LLMReranker = Depends(get_reranker),
     cache: CacheService = Depends(get_cache),
 ) -> SearchService:
     """Get SearchService instance"""

@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class AskRequest(BaseModel):
@@ -95,6 +95,12 @@ class UpdateResolutionRequest(BaseModel):
         description="New bug status"
     )
 
+    @field_validator("status", mode="before")
+    @classmethod
+    def normalize_status(cls, v: str | None) -> str | None:
+        """Normalize status to lowercase for case-insensitive input"""
+        return v.lower() if isinstance(v, str) else v
+
 
 class CreateAPIKeyRequest(BaseModel):
     """Request model for creating a new API key"""
@@ -164,6 +170,12 @@ class SearchRequest(BaseModel):
         default=None,
         description="Filter: bugs created on or after this date"
     )
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def normalize_status(cls, v: str | None) -> str | None:
+        """Normalize status to lowercase for case-insensitive input"""
+        return v.lower() if isinstance(v, str) else v
 
     date_to: datetime | None = Field(
         default=None,

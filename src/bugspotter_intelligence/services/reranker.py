@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import re
 from typing import Optional
 
 from bugspotter_intelligence.llm import LLMProvider
@@ -117,24 +118,33 @@ class LLMReranker:
         """
         Parse LLM response into a list of scores.
 
-        Extracts a JSON array from the response, clamps values to [0.0, 1.0].
-        Falls back to 0.5 for all candidates on parse failure.
+        Extracts a JSON array from the response using regex pattern matching,
+        clamps values to [0.0, 1.0]. Falls back to 0.5 for all candidates on
+        parse failure.
         """
-        # Try to extract JSON array from the response
         text = raw.strip()
 
-        # Find the JSON array in the response
-        start = text.find("[")
-        end = text.rfind("]")
+        # Use regex to find JSON array patterns (more robust than simple find/rfind)
+        # Pattern matches: [ followed by numbers/dots/commas/whitespace, then ]
+        array_pattern = r'\[[\d\.,\s]+\]'
+        matches = re.findall(array_pattern, text)
 
-        if start == -1 or end == -1 or end <= start:
+        if not matches:
             logger.debug(f"No JSON array found in LLM response: {text[:100]}")
             return [0.5] * expected_count
 
-        try:
-            scores = json.loads(text[start:end + 1])
-        except json.JSONDecodeError:
-            logger.debug(f"Failed to parse JSON array: {text[start:end + 1][:100]}")
+        # Try parsing each match until we find a valid list
+        for match in matches:
+            try:
+                scores = json.loads(match)
+                if isinstance(scores, list) and len(scores) > 0:
+                    # Found a valid array, use it
+                    break
+            except json.JSONDecodeError:
+                continue
+        else:
+            # No valid JSON array found
+            logger.debug(f"Failed to parse any JSON array from matches: {matches}")
             return [0.5] * expected_count
 
         if not isinstance(scores, list):

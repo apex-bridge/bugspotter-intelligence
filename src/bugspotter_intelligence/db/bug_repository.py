@@ -233,6 +233,10 @@ class BugRepository:
         Uses cosine similarity ordering with optional status and date filters.
         Returns all results for the tenant ordered by relevance.
 
+        Uses two separate queries for better performance:
+        1. COUNT query to get total matching documents
+        2. SELECT query with pagination to fetch current page
+
         Args:
             conn: Database connection
             embedding: Query embedding vector
@@ -247,45 +251,55 @@ class BugRepository:
             Tuple of (result dicts, total matching count)
         """
         async with conn.cursor() as cursor:
-            query = """
+            # Build WHERE clause for both queries
+            where_conditions = ["(tenant_id = %s OR tenant_id IS NULL)"]
+            count_params: list = [tenant_id]
+
+            if status is not None:
+                where_conditions.append("status = %s")
+                count_params.append(status)
+
+            if date_from is not None:
+                where_conditions.append("created_at >= %s")
+                count_params.append(date_from)
+
+            if date_to is not None:
+                where_conditions.append("created_at <= %s")
+                count_params.append(date_to)
+
+            where_clause = " AND ".join(where_conditions)
+
+            # Query 1: Get total count
+            count_query = f"""
+                SELECT COUNT(*)
+                FROM bug_embeddings
+                WHERE {where_clause}
+            """
+            await cursor.execute(count_query, count_params)
+            total_row = await cursor.fetchone()
+            total = total_row[0] if total_row else 0
+
+            if total == 0:
+                return [], 0
+
+            # Query 2: Get paginated results
+            select_query = f"""
                 SELECT bug_id,
                        title,
                        description,
                        status,
                        resolution,
                        1 - (embedding <=> %s::vector) as similarity,
-                       created_at,
-                       COUNT(*) OVER() as total_count
+                       created_at
                 FROM bug_embeddings
-                WHERE (tenant_id = %s OR tenant_id IS NULL)
-            """
-            params: list = [embedding, tenant_id]
-
-            if status is not None:
-                query += " AND status = %s"
-                params.append(status)
-
-            if date_from is not None:
-                query += " AND created_at >= %s"
-                params.append(date_from)
-
-            if date_to is not None:
-                query += " AND created_at <= %s"
-                params.append(date_to)
-
-            query += """
+                WHERE {where_clause}
                 ORDER BY embedding <=> %s::vector
                 LIMIT %s OFFSET %s
             """
-            params.extend([embedding, limit, offset])
+            select_params = [embedding] + count_params + [embedding, limit, offset]
 
-            await cursor.execute(query, params)
+            await cursor.execute(select_query, select_params)
             rows = await cursor.fetchall()
-
-            if not rows:
-                return [], 0
-
-            total = rows[0][7]  # total_count from window function
 
             results = [
                 {
