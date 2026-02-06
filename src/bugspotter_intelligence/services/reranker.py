@@ -149,6 +149,29 @@ class LLMReranker:
             except json.JSONDecodeError:
                 pass
 
+        # Strategy 3: Find and try each bracket pair (handles multiple arrays)
+        pos = 0
+        while pos < len(text):
+            start = text.find("[", pos)
+            if start == -1:
+                break
+
+            # Find the matching closing bracket
+            end = text.find("]", start + 1)
+            if end == -1:
+                break
+
+            try:
+                candidate = text[start : end + 1]
+                scores = json.loads(candidate)
+                if isinstance(scores, list) and len(scores) > 0:
+                    return LLMReranker._clamp_scores(scores, expected_count)
+            except json.JSONDecodeError:
+                pass
+
+            # Move past this bracket pair
+            pos = end + 1
+
         # Fallback: return default scores
         logger.debug(f"Failed to parse scores from LLM response: {text[:100]}")
         return [0.5] * expected_count
