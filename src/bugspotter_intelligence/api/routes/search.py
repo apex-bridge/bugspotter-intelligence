@@ -38,10 +38,8 @@ async def search_bugs(
     else:
         result = await service.search_fast(conn, body.query, **search_kwargs)
 
-    search_results = [SearchResult(**r) for r in result["results"]]
-
     return SearchResponse(
-        results=search_results,
+        results=result["results"],
         total=result["total"],
         limit=result["limit"],
         offset=result["offset"],
