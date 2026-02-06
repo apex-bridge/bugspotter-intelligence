@@ -155,9 +155,6 @@ class LLMReranker:
             logger.debug(f"Failed to parse any JSON array from matches: {matches}")
             return [0.5] * expected_count
 
-        if not isinstance(scores, list):
-            return [0.5] * expected_count
-
         # Pad or truncate to expected count
         if len(scores) < expected_count:
             scores.extend([0.5] * (expected_count - len(scores)))
