@@ -232,6 +232,111 @@ class TestParseScores:
         scores = LLMReranker._parse_scores("[1, 0, 1]", 3)
         assert scores == [1.0, 0.0, 1.0]
 
+    def test_pure_json_array(self):
+        """Should parse response that contains only JSON array (Strategy 1)"""
+        scores = LLMReranker._parse_scores("[0.95, 0.45, 0.85]", 3)
+        assert scores == [0.95, 0.45, 0.85]
+
+    def test_json_array_with_whitespace(self):
+        """Should handle whitespace around pure JSON array"""
+        scores = LLMReranker._parse_scores("  \\n  [0.9, 0.5, 0.7]  \\n  ", 3)
+        assert scores == [0.9, 0.5, 0.7]
+
+    def test_array_with_prefix_text(self):
+        """Should extract array when preceded by text (Strategy 2)"""
+        scores = LLMReranker._parse_scores(
+            "Sure, here are the scores: [0.8, 0.3, 0.6]", 3
+        )
+        assert scores == [0.8, 0.3, 0.6]
+
+    def test_array_with_suffix_text(self):
+        """Should extract array when followed by text (Strategy 2)"""
+        scores = LLMReranker._parse_scores(
+            "[0.7, 0.4, 0.9] - these are based on relevance", 3
+        )
+        assert scores == [0.7, 0.4, 0.9]
+
+    def test_array_buried_in_text(self):
+        """Should extract array from middle of text (Strategy 2)"""
+        scores = LLMReranker._parse_scores(
+            "Based on analysis, scores are [0.85, 0.25, 0.65] for the candidates", 3
+        )
+        assert scores == [0.85, 0.25, 0.65]
+
+    def test_malformed_json_before_valid_array(self):
+        """Should skip malformed JSON and find valid array"""
+        scores = LLMReranker._parse_scores(
+            "First attempt: [invalid, json here] Second: [0.9, 0.5, 0.7]", 3
+        )
+        assert scores == [0.9, 0.5, 0.7]
+
+    def test_empty_string(self):
+        """Should return fallback scores for empty string"""
+        scores = LLMReranker._parse_scores("", 3)
+        assert scores == [0.5, 0.5, 0.5]
+
+    def test_no_brackets(self):
+        """Should return fallback scores when no brackets found"""
+        scores = LLMReranker._parse_scores("No array here at all", 3)
+        assert scores == [0.5, 0.5, 0.5]
+
+    def test_brackets_but_invalid_json(self):
+        """Should return fallback when brackets contain invalid JSON"""
+        scores = LLMReranker._parse_scores("[not valid json at all]", 3)
+        assert scores == [0.5, 0.5, 0.5]
+
+    def test_empty_array(self):
+        """Should return fallback for empty array"""
+        scores = LLMReranker._parse_scores("[]", 3)
+        assert scores == [0.5, 0.5, 0.5]
+
+    def test_multiline_response_with_array(self):
+        """Should extract array from multiline response"""
+        response = """Here are my scores for the candidates:
+
+        [0.92, 0.34, 0.78]
+
+        These reflect the relevance to the query."""
+        scores = LLMReranker._parse_scores(response, 3)
+        assert scores == [0.92, 0.34, 0.78]
+
+
+class TestClampScores:
+    """Tests for LLMReranker._clamp_scores"""
+
+    def test_clamps_values_correctly(self):
+        """Should clamp values to [0.0, 1.0] range"""
+        scores = LLMReranker._clamp_scores([1.5, 0.5, -0.3, 0.0, 1.0], 5)
+        assert scores == [1.0, 0.5, 0.0, 0.0, 1.0]
+
+    def test_pads_short_list(self):
+        """Should pad shorter lists with 0.5"""
+        scores = LLMReranker._clamp_scores([0.9, 0.3], 5)
+        assert scores == [0.9, 0.3, 0.5, 0.5, 0.5]
+
+    def test_truncates_long_list(self):
+        """Should truncate longer lists"""
+        scores = LLMReranker._clamp_scores([0.9, 0.8, 0.7, 0.6, 0.5], 3)
+        assert scores == [0.9, 0.8, 0.7]
+
+    def test_handles_non_numeric_values(self):
+        """Should replace non-numeric values with 0.5"""
+        scores = LLMReranker._clamp_scores([0.9, "high", None, 0.7], 4)
+        assert scores == [0.9, 0.5, 0.5, 0.7]
+
+    def test_handles_integer_values(self):
+        """Should convert integers to floats"""
+        scores = LLMReranker._clamp_scores([1, 0, 1], 3)
+        assert scores == [1.0, 0.0, 1.0]
+
+    def test_preserves_exact_count(self):
+        """Should return exactly expected_count elements"""
+        scores = LLMReranker._clamp_scores([0.5], 1)
+        assert len(scores) == 1
+
+        scores = LLMReranker._clamp_scores([0.1, 0.2, 0.3], 3)
+        assert len(scores) == 3
+
 
 class TestBuildPrompt:
     """Tests for LLMReranker._build_prompt"""

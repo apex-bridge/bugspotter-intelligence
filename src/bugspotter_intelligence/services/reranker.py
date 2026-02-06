@@ -3,7 +3,6 @@
 import asyncio
 import json
 import logging
-import re
 
 from bugspotter_intelligence.llm import LLMProvider
 
@@ -125,40 +124,47 @@ class LLMReranker:
         """
         Parse LLM response into a list of scores.
 
-        Extracts a JSON array from the response using regex pattern matching,
-        clamps values to [0.0, 1.0]. Falls back to 0.5 for all candidates on
-        parse failure.
+        Uses JSON parser directly instead of regex for more reliable parsing.
+        Falls back to 0.5 for all candidates on parse failure.
         """
         text = raw.strip()
 
-        # Use regex to find JSON array patterns containing numbers
-        # Matches arrays like [0.9, 0.3, 0.7] or [-0.5, 1.0, 0.2]
-        # Pattern: [ optional-whitespace numbers/commas/dots/negatives optional-whitespace ]
-        array_pattern = r"\[\s*[\d\.,\s\-]+\s*\]"
-        matches = re.findall(array_pattern, text)
+        # Strategy 1: Parse entire response as JSON (LLM returns just the array)
+        try:
+            scores = json.loads(text)
+            if isinstance(scores, list) and len(scores) > 0:
+                return LLMReranker._clamp_scores(scores, expected_count)
+        except json.JSONDecodeError:
+            pass
 
-        if not matches:
-            logger.debug(f"No JSON array found in LLM response: {text[:100]}")
-            return [0.5] * expected_count
-
-        # Try parsing each match until we find a valid list
-        for match in matches:
+        # Strategy 2: Extract substring from first '[' to last ']'
+        start = text.find("[")
+        end = text.rfind("]")
+        if start != -1 and end != -1 and end > start:
             try:
-                scores = json.loads(match)
+                candidate = text[start : end + 1]
+                scores = json.loads(candidate)
                 if isinstance(scores, list) and len(scores) > 0:
-                    # Found a valid array, use it
-                    break
+                    return LLMReranker._clamp_scores(scores, expected_count)
             except json.JSONDecodeError:
-                continue
-        else:
-            # No valid JSON array found
-            logger.debug(f"Failed to parse any JSON array from matches: {matches}")
-            return [0.5] * expected_count
+                pass
 
+        # Fallback: return default scores
+        logger.debug(f"Failed to parse scores from LLM response: {text[:100]}")
+        return [0.5] * expected_count
+
+    @staticmethod
+    def _clamp_scores(scores: list, expected_count: int) -> list[float]:
+        """
+        Pad/truncate scores to expected count and clamp values to [0.0, 1.0].
+
+        Non-numeric values are replaced with 0.5.
+        """
         # Pad or truncate to expected count
         if len(scores) < expected_count:
-            scores.extend([0.5] * (expected_count - len(scores)))
-        scores = scores[:expected_count]
+            scores = scores + [0.5] * (expected_count - len(scores))
+        else:
+            scores = scores[:expected_count]
 
         # Clamp each score to [0.0, 1.0], fallback to 0.5 for non-numeric
         clamped = []
