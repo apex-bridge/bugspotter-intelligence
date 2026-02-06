@@ -1,23 +1,26 @@
-"""Admin API endpoints for key management"""
+"""Admin API endpoints for key management and system stats"""
 
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from psycopg import AsyncConnection
 
+from bugspotter_intelligence.api.deps import get_cache
 from bugspotter_intelligence.auth import (
     APIKeyService,
     TenantContext,
     get_api_key_service,
 )
+from bugspotter_intelligence.cache import CacheService
 from bugspotter_intelligence.db.database import get_db_connection
 from bugspotter_intelligence.models.requests import CreateAPIKeyRequest
-from bugspotter_intelligence.rate_limiting import check_rate_limit_admin
 from bugspotter_intelligence.models.responses import (
     APIKeyListResponse,
     APIKeyResponse,
+    CacheStatsResponse,
     CreateAPIKeyResponse,
 )
+from bugspotter_intelligence.rate_limiting import check_rate_limit_admin
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -123,3 +126,25 @@ async def revoke_api_key(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"API key {key_id} not found",
         )
+
+
+@router.get("/cache/stats", response_model=CacheStatsResponse)
+async def get_cache_stats(
+    tenant: TenantContext = Depends(check_rate_limit_admin),
+    cache: CacheService = Depends(get_cache),
+) -> CacheStatsResponse:
+    """
+    Get cache statistics (admin only).
+
+    Returns global Redis keyspace hit/miss counts and hit rate across all tenants.
+
+    Note: These are system-wide metrics, not tenant-specific. Admin users from any
+    tenant can view overall system cache performance, which may reveal aggregate
+    usage patterns across all tenants. This is intentional for operational monitoring
+    and capacity planning. Tenant-specific data is not exposed, only aggregate metrics.
+
+    If strict tenant isolation of operational metrics is required, consider restricting
+    this endpoint to super-admin roles only.
+    """
+    stats = await cache.get_stats()
+    return CacheStatsResponse(**stats)

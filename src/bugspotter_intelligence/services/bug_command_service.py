@@ -1,4 +1,5 @@
-from typing import Optional
+import logging
+from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
 from psycopg import AsyncConnection
@@ -7,6 +8,11 @@ from bugspotter_intelligence.db.bug_repository import BugRepository
 from bugspotter_intelligence.llm import LLMProvider
 from bugspotter_intelligence.services.embeddings import EmbeddingProvider
 from bugspotter_intelligence.utils.log_extractor import build_embedding_text
+
+if TYPE_CHECKING:
+    from bugspotter_intelligence.cache.service import CacheService
+
+logger = logging.getLogger(__name__)
 
 
 class BugCommandService:
@@ -19,10 +25,16 @@ class BugCommandService:
     - Mark bugs as duplicates
     """
 
-    def __init__(self, llm_provider: LLMProvider, embedding_provider: EmbeddingProvider):
+    def __init__(
+        self,
+        llm_provider: LLMProvider,
+        embedding_provider: EmbeddingProvider,
+        cache: Optional["CacheService"] = None,
+    ):
         self.llm = llm_provider
         self.embeddings = embedding_provider
         self.repo = BugRepository()
+        self.cache = cache
 
     async def analyze_and_store_bug(
         self,
@@ -80,6 +92,14 @@ class BugCommandService:
             tenant_id=tenant_id,
         )
 
+        # Invalidate cached search results for this tenant
+        # Note: Invalidation occurs AFTER database commit. There's a small window
+        # where concurrent reads may return cached results missing this new bug.
+        # This is acceptable eventual consistency for this use case - search
+        # results will include the new bug on the next cache refresh.
+        if self.cache is not None and tenant_id is not None:
+            await self.cache.invalidate_tenant(tenant_id)
+
         return {
             "bug_id": bug_id,
             "embedding_generated": True,
@@ -127,6 +147,12 @@ class BugCommandService:
             tenant_id=tenant_id,
         )
 
+        # Invalidate cached search results when status changes
+        # Status changes (open -> resolved) affect search filters and should
+        # trigger cache invalidation to reflect the updated bug state.
+        if self.cache is not None and tenant_id is not None:
+            await self.cache.invalidate_tenant(tenant_id)
+
         return {
             "bug_id": bug_id,
             "status": status,
@@ -143,9 +169,7 @@ class BugCommandService:
         )
 
         summary = await self.llm.generate(
-            prompt=prompt,
-            temperature=0.3,
-            max_tokens=100
+            prompt=prompt, temperature=0.3, max_tokens=100
         )
 
         return summary.strip()

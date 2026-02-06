@@ -214,3 +214,104 @@ class BugRepository:
             await cursor.execute(query, params)
             await conn.commit()
             return cursor.rowcount > 0
+
+    @staticmethod
+    async def search(
+        conn: AsyncConnection,
+        embedding: list[float],
+        *,
+        tenant_id: UUID,
+        limit: int = 10,
+        offset: int = 0,
+        status: Optional[str] = None,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
+    ) -> tuple[list[dict], int]:
+        """
+        Search bugs by vector similarity with filters and pagination.
+
+        Uses cosine similarity ordering with optional status and date filters.
+        Returns all results for the tenant ordered by relevance.
+
+        Uses two separate queries for better performance:
+        1. COUNT query to get total matching documents
+        2. SELECT query with pagination to fetch current page
+
+        Args:
+            conn: Database connection
+            embedding: Query embedding vector
+            tenant_id: Tenant UUID for isolation
+            limit: Page size
+            offset: Page offset
+            status: Optional status filter
+            date_from: Optional created_at lower bound
+            date_to: Optional created_at upper bound
+
+        Returns:
+            Tuple of (result dicts, total matching count)
+        """
+        async with conn.cursor() as cursor:
+            # Build WHERE clause for both queries
+            where_conditions = ["(tenant_id = %s OR tenant_id IS NULL)"]
+            count_params: list = [tenant_id]
+
+            if status is not None:
+                where_conditions.append("status = %s")
+                count_params.append(status)
+
+            if date_from is not None:
+                where_conditions.append("created_at >= %s")
+                count_params.append(date_from)
+
+            if date_to is not None:
+                where_conditions.append("created_at <= %s")
+                count_params.append(date_to)
+
+            where_clause = " AND ".join(where_conditions)
+
+            # Query 1: Get total count
+            count_query = f"""
+                SELECT COUNT(*)
+                FROM bug_embeddings
+                WHERE {where_clause}
+            """
+            await cursor.execute(count_query, count_params)
+            total_row = await cursor.fetchone()
+            total = total_row[0] if total_row else 0
+
+            if total == 0:
+                return [], 0
+
+            # Query 2: Get paginated results
+            select_query = f"""
+                SELECT bug_id,
+                       title,
+                       description,
+                       status,
+                       resolution,
+                       1 - (embedding <=> %s::vector) as similarity,
+                       created_at
+                FROM bug_embeddings
+                WHERE {where_clause}
+                ORDER BY embedding <=> %s::vector
+                LIMIT %s OFFSET %s
+            """
+            select_params = [embedding] + count_params + [embedding, limit, offset]
+
+            await cursor.execute(select_query, select_params)
+            rows = await cursor.fetchall()
+
+            results = [
+                {
+                    "bug_id": row[0],
+                    "title": row[1],
+                    "description": row[2],
+                    "status": row[3],
+                    "resolution": row[4],
+                    "similarity": float(row[5]),
+                    "created_at": row[6],
+                }
+                for row in rows
+            ]
+
+            return results, total
