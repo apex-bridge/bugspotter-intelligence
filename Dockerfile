@@ -1,7 +1,7 @@
 # ============================================================================
 # BugSpotter Intelligence - Multi-Stage Docker Build
 # ============================================================================
-# Stage 1: Builder - Install dependencies and prepare the application
+# Stage 1: Builder - Install dependencies, package, and download model
 # Stage 2: Production - Minimal runtime image
 # ============================================================================
 
@@ -22,11 +22,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml ./
 COPY src/ ./src/
 
-# Install production dependencies into a virtual environment
+# Install all dependencies + package into a virtual environment
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir .
+
+# Pre-download the embedding model in the builder stage for better cache
+# (source code changes won't re-download the ~90MB model)
+ENV SENTENCE_TRANSFORMERS_HOME=/app/.cache \
+    HF_HOME=/app/.cache/huggingface \
+    TORCH_HOME=/app/.cache/torch
+RUN mkdir -p /app/.cache/huggingface /app/.cache/torch && \
+    python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
 
 # ============================================================================
 # Stage 2: Production
@@ -45,27 +53,24 @@ RUN groupadd -g 1001 bugspotter && \
 
 WORKDIR /app
 
-# Copy virtual environment from builder
+# Copy virtual environment (includes installed package + all dependencies)
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy application source and install package (non-editable, deps already in venv)
-COPY src/ ./src/
-COPY pyproject.toml ./
-RUN pip install --no-cache-dir --no-deps .
-
-# Set all model/cache directories to /app/.cache (HuggingFace, sentence-transformers, torch)
+# Copy pre-downloaded model cache from builder
 ENV SENTENCE_TRANSFORMERS_HOME=/app/.cache \
     HF_HOME=/app/.cache/huggingface \
     TORCH_HOME=/app/.cache/torch
-RUN mkdir -p /app/.cache/huggingface /app/.cache/torch && \
-    chown -R bugspotter:bugspotter /app/.cache
+COPY --from=builder /app/.cache /app/.cache
+
+# Copy LICENSE (MIT compliance requires inclusion in distributed software)
+COPY LICENSE ./
+
+# Set ownership of cache directory for non-root user
+RUN chown -R bugspotter:bugspotter /app/.cache
 
 # Switch to non-root user
 USER bugspotter
-
-# Pre-download the embedding model at build time so startup is fast
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
 
 EXPOSE 8000
 

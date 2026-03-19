@@ -32,9 +32,8 @@ docker/
 .env.*
 !.env.example
 
-# Documentation
+# Documentation (keep LICENSE for MIT compliance)
 *.md
-LICENSE
 ROADMAP.md
 
 # CI
