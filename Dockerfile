@@ -18,8 +18,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy dependency files
+# Copy dependency files and source (pip install . needs the source)
 COPY pyproject.toml ./
+COPY src/ ./src/
 
 # Install production dependencies into a virtual environment
 RUN python -m venv /opt/venv
@@ -38,9 +39,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
+# Create non-root user (nologin — no interactive shell needed)
 RUN groupadd -g 1001 bugspotter && \
-    useradd -u 1001 -g bugspotter -s /bin/bash bugspotter
+    useradd -u 1001 -g bugspotter -s /sbin/nologin bugspotter
 
 WORKDIR /app
 
@@ -55,11 +56,9 @@ COPY pyproject.toml ./
 # Install the package itself (source only, deps already in venv)
 RUN pip install --no-cache-dir --no-deps -e .
 
-# Copy database init scripts
-COPY docker/postgres/init-db.sql ./docker/postgres/init-db.sql
-
 # Create cache directory for sentence-transformers model
-RUN mkdir -p /app/.cache && chown -R bugspotter:bugspotter /app
+ENV SENTENCE_TRANSFORMERS_HOME=/app/.cache
+RUN mkdir -p /app/.cache && chown -R bugspotter:bugspotter /app/.cache
 
 # Switch to non-root user
 USER bugspotter
