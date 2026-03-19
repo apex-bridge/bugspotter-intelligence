@@ -1,0 +1,40 @@
+# Version control
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+.venv
+venv
+*.egg-info
+dist
+build
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Testing
+tests/
+.pytest_cache
+.coverage
+htmlcov
+
+# Docker (don't send docker dir to app container)
+docker/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Documentation (keep LICENSE for MIT compliance)
+*.md
+ROADMAP.md
+
+# CI
+.github/

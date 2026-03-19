@@ -203,33 +203,75 @@ DUPLICATE_THRESHOLD=0.90
 
 See `.env.example` for all options.
 
+## Docker Deployment
+
+### Production (containerized)
+
+Build and run the intelligence service as a Docker container:
+
+```bash
+# Build the image
+docker build -t bugspotter-intelligence .
+
+# Run standalone (requires external postgres, redis, ollama)
+docker run -p 8000:8000 \
+  -e DATABASE_HOST=host.docker.internal \
+  -e REDIS_HOST=host.docker.internal \
+  -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
+  bugspotter-intelligence
+```
+
+### Integrated with BugSpotter
+
+When deployed alongside the main BugSpotter stack, the intelligence service runs as a Docker Compose profile. See the [Intelligence Integration Guide](https://github.com/apexbridge-tech/bugspotter/blob/main/docs/INTELLIGENCE_INTEGRATION_GUIDE.md) for setup.
+
+```bash
+# From the main bugspotter repo:
+docker compose --profile intelligence up -d
+```
+
+### Development (local services only)
+
+```bash
+# Start infrastructure (postgres + pgvector, ollama, redis)
+docker-compose up -d
+
+# Run the API locally
+uvicorn bugspotter_intelligence.main:app --reload
+```
+
 ## Docker Services
 
-- **PostgreSQL 16** with pgvector extension
-- **Ollama** with llama3.1:8b model (auto-downloaded)
-- **Redis 7** for rate limiting
+- **PostgreSQL 16** with pgvector extension (vector similarity)
+- **Ollama** with llama3.1:8b model (local LLM, auto-downloaded)
+- **Redis 7** for rate limiting and query caching
 
 ## Development Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for detailed roadmap.
 
-### Completed (v0.2.0)
+### Completed (v0.3.0)
 - [x] LLM provider abstraction with registry pattern
-- [x] Ollama, Claude, and OpenAI providers
+- [x] Ollama provider (Claude and OpenAI configured but not implemented)
 - [x] Docker Compose setup with pgvector
-- [x] FastAPI REST API routes
+- [x] Production Dockerfile with multi-stage build
+- [x] FastAPI REST API routes (13 endpoints)
 - [x] Bug similarity search
 - [x] AI mitigation suggestions
-- [x] API key authentication
+- [x] Smart search with LLM reranking
+- [x] Redis query caching with tenant-versioned invalidation
+- [x] API key authentication with bcrypt
 - [x] Multi-tenant data isolation
-- [x] Redis rate limiting
-- [x] Comprehensive test suite
+- [x] Redis rate limiting (sliding window)
+- [x] Comprehensive test suite (unit + integration)
+- [x] GitHub Actions CI/CD pipeline
 
-### Planned (v0.3.0+)
-- [ ] Smart search with LLM reranking
-- [ ] Query caching
+### Planned (v0.4.0+)
+- [ ] Claude and OpenAI LLM providers
 - [ ] Feedback loop for improving suggestions
 - [ ] Root cause analysis
+- [ ] Bug summarization
+- [ ] Observability and production hardening
 - [ ] Trend detection
 
 ## Contributing

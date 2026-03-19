@@ -45,3 +45,11 @@ jobs:
     - name: Run integration tests (with Docker)
       run: |
         pytest tests/ -v -m "integration"
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Build Docker image
+      run: docker build -t bugspotter-intelligence:ci .
