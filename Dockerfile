@@ -56,9 +56,12 @@ COPY pyproject.toml ./
 # Install the package itself (source only, deps already in venv)
 RUN pip install --no-cache-dir --no-deps -e .
 
-# Create cache directory for sentence-transformers model
-ENV SENTENCE_TRANSFORMERS_HOME=/app/.cache
-RUN mkdir -p /app/.cache && chown -R bugspotter:bugspotter /app/.cache
+# Set all model/cache directories to /app/.cache (HuggingFace, sentence-transformers, torch)
+ENV SENTENCE_TRANSFORMERS_HOME=/app/.cache \
+    HF_HOME=/app/.cache/huggingface \
+    TORCH_HOME=/app/.cache/torch
+RUN mkdir -p /app/.cache/huggingface /app/.cache/torch && \
+    chown -R bugspotter:bugspotter /app/.cache
 
 # Switch to non-root user
 USER bugspotter
