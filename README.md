@@ -223,7 +223,7 @@ docker run -p 8000:8000 \
 
 ### Integrated with BugSpotter
 
-When deployed alongside the main BugSpotter stack, the intelligence service runs as a Docker Compose profile. See the [Intelligence Integration Guide](../bugspotter/docs/INTELLIGENCE_INTEGRATION_GUIDE.md) for setup.
+When deployed alongside the main BugSpotter stack, the intelligence service runs as a Docker Compose profile. See the [Intelligence Integration Guide](https://github.com/apexbridge-tech/bugspotter/blob/main/docs/INTELLIGENCE_INTEGRATION_GUIDE.md) for setup.
 
 ```bash
 # From the main bugspotter repo:

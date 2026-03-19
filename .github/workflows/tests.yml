@@ -53,20 +53,3 @@ jobs:
 
     - name: Build Docker image
       run: docker build -t bugspotter-intelligence:ci .
-
-    - name: Verify health endpoint
-      run: |
-        docker run -d --name intel-test -p 8000:8000 \
-          -e DATABASE_HOST=localhost \
-          -e DATABASE_PORT=5432 \
-          -e DATABASE_NAME=test \
-          -e DATABASE_USER=postgres \
-          -e DATABASE_PASSWORD=postgres \
-          -e AUTH_ENABLED=false \
-          -e REDIS_HOST=localhost \
-          -e LLM_PROVIDER=ollama \
-          -e OLLAMA_BASE_URL=http://localhost:11434 \
-          bugspotter-intelligence:ci || true
-        sleep 5
-        docker logs intel-test 2>&1 | head -30
-        docker rm -f intel-test

@@ -49,12 +49,10 @@ WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy application source
+# Copy application source and install package (non-editable, deps already in venv)
 COPY src/ ./src/
 COPY pyproject.toml ./
-
-# Install the package itself (source only, deps already in venv)
-RUN pip install --no-cache-dir --no-deps -e .
+RUN pip install --no-cache-dir --no-deps .
 
 # Set all model/cache directories to /app/.cache (HuggingFace, sentence-transformers, torch)
 ENV SENTENCE_TRANSFORMERS_HOME=/app/.cache \
