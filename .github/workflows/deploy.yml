@@ -143,7 +143,7 @@ jobs:
 
           # Pull the new intelligence image
           echo "Pulling latest intelligence image..."
-          docker compose --profile intelligence pull intelligence 2>/dev/null || {
+          docker compose --profile intelligence pull intelligence || {
             echo "⚠️ Intelligence profile not configured or image not found"
             echo "Ensure docker-compose.yml has the intelligence profile"
             exit 1
@@ -153,19 +153,20 @@ jobs:
           echo "Restarting intelligence service..."
           docker compose --profile intelligence up -d --no-build intelligence
 
-          # Wait for health check
+          # Wait for Docker health check (defined in Dockerfile HEALTHCHECK)
           echo "Waiting for intelligence health check..."
           for i in $(seq 1 20); do
-            if docker compose exec -T api curl -sf http://intelligence:8000/health > /dev/null 2>&1; then
+            HEALTH=$(docker inspect --format='{{.State.Health.Status}}' bugspotter-intelligence 2>/dev/null || echo "starting")
+            if [ "$HEALTH" = "healthy" ]; then
               echo "✅ Intelligence service is healthy"
               break
             fi
             if [ $i -eq 20 ]; then
-              echo "❌ Intelligence health check timed out"
+              echo "❌ Intelligence health check timed out (status: $HEALTH)"
               docker compose logs --tail=30 intelligence
               exit 1
             fi
-            echo "  Waiting... ($i/20)"
+            echo "  Waiting... ($i/20, status: $HEALTH)"
             sleep 5
           done
 
