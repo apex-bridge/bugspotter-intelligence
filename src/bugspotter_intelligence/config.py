@@ -1,4 +1,4 @@
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     api_key_prefix: str = Field(
         default="bsi_",
         description="Prefix for generated API keys"
+    )
+    master_api_key: SecretStr | None = Field(
+        default=None,
+        description="Master key for cross-tenant operations (e.g. provisioning per-org keys). Keep secret."
     )
 
     # === Redis (Rate Limiting) ===

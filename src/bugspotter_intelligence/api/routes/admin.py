@@ -11,9 +11,10 @@ from bugspotter_intelligence.auth import (
     TenantContext,
     get_api_key_service,
 )
+from bugspotter_intelligence.auth.dependencies import require_master_key
 from bugspotter_intelligence.cache import CacheService
 from bugspotter_intelligence.db.database import get_db_connection
-from bugspotter_intelligence.models.requests import CreateAPIKeyRequest
+from bugspotter_intelligence.models.requests import CreateAPIKeyRequest, CreateTenantAPIKeyRequest
 from bugspotter_intelligence.models.responses import (
     APIKeyListResponse,
     APIKeyResponse,
@@ -126,6 +127,34 @@ async def revoke_api_key(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"API key {key_id} not found",
         )
+
+
+@router.post("/tenants/{tenant_id}/api-keys", response_model=CreateAPIKeyResponse, status_code=201)
+async def create_tenant_api_key(
+    tenant_id: UUID,
+    body: CreateTenantAPIKeyRequest,
+    _: None = Depends(require_master_key),
+    conn: AsyncConnection = Depends(get_db_connection),
+    service: APIKeyService = Depends(get_api_key_service),
+) -> CreateAPIKeyResponse:
+    """
+    Create an API key for any tenant (master key required).
+
+    Used by the BugSpotter backend to provision per-org intelligence keys
+    with proper tenant isolation. The plain key is returned only once.
+    """
+    api_key, plain_key = await service.create_key(
+        conn=conn,
+        tenant_id=tenant_id,
+        name=body.name,
+        rate_limit_per_minute=body.rate_limit_per_minute,
+        is_admin=False,  # master-key provisioned keys are always non-admin
+    )
+
+    return CreateAPIKeyResponse(
+        api_key=APIKeyResponse.model_validate(api_key),
+        plain_key=plain_key,
+    )
 
 
 @router.get("/cache/stats", response_model=CacheStatsResponse)
