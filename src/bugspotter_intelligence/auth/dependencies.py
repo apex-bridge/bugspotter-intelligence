@@ -139,9 +139,13 @@ async def require_master_key(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Master API key not configured on this server",
         )
-    if not secrets.compare_digest(
-        credentials.credentials if credentials else "", master_key_value
-    ):
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing master API key",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if not secrets.compare_digest(credentials.credentials, master_key_value):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid master API key",

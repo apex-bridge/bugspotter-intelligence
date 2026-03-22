@@ -320,7 +320,7 @@ class TestRequireMasterKey:
 
     @pytest.mark.asyncio
     async def test_rejects_missing_credentials(self):
-        """Should return 401 when no Bearer token provided"""
+        """Should return 401 with distinct message when no Bearer token provided"""
         from bugspotter_intelligence.auth.dependencies import require_master_key
 
         settings = self._make_settings("correct-master-key")
@@ -329,6 +329,7 @@ class TestRequireMasterKey:
             await require_master_key(credentials=None, settings=settings)
 
         assert exc_info.value.status_code == 401
+        assert "Missing master API key" in exc_info.value.detail
 
     @pytest.mark.asyncio
     async def test_returns_503_when_master_key_not_configured(self):
