@@ -117,6 +117,32 @@ async def require_admin(
     return tenant
 
 
+async def require_master_key(
+    credentials: HTTPAuthorizationCredentials | None = Security(security),
+    settings: Settings = Depends(_get_settings),
+) -> None:
+    """
+    Dependency that validates a master API key for cross-tenant operations.
+
+    The master key is configured via MASTER_API_KEY env var and allows
+    creating API keys for arbitrary tenants (e.g. provisioning per-org keys).
+
+    Raises:
+        HTTPException: 401 if missing or invalid, 503 if master key not configured
+    """
+    if not settings.master_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Master API key not configured on this server",
+        )
+    if not credentials or credentials.credentials != settings.master_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid master API key",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
 async def get_optional_tenant(
     credentials: HTTPAuthorizationCredentials | None = Security(security),
     conn=Depends(get_db_connection),

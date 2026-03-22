@@ -19,6 +19,10 @@ class Settings(BaseSettings):
         default="bsi_",
         description="Prefix for generated API keys"
     )
+    master_api_key: str | None = Field(
+        default=None,
+        description="Master key for cross-tenant operations (e.g. provisioning per-org keys). Keep secret."
+    )
 
     # === Redis (Rate Limiting) ===
     redis_host: str = "localhost"
