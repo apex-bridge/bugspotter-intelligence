@@ -282,7 +282,8 @@ class TestRequireMasterKey:
     def _make_settings(self, key: str | None):
         from bugspotter_intelligence.config import Settings
         settings = MagicMock(spec=Settings)
-        settings.master_api_key = SecretStr(key) if key else None
+        # Use SecretStr for any non-None value, including empty string
+        settings.master_api_key = SecretStr(key) if key is not None else None
         return settings
 
     def _make_credentials(self, token: str):
@@ -333,6 +334,20 @@ class TestRequireMasterKey:
         from bugspotter_intelligence.auth.dependencies import require_master_key
 
         settings = self._make_settings(None)
+        credentials = self._make_credentials("any-key")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await require_master_key(credentials=credentials, settings=settings)
+
+        assert exc_info.value.status_code == 503
+        assert "not configured" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_returns_503_when_master_key_is_empty_string(self):
+        """Should return 503 when MASTER_API_KEY env var is set to empty string"""
+        from bugspotter_intelligence.auth.dependencies import require_master_key
+
+        settings = self._make_settings("")  # SecretStr(""), not None
         credentials = self._make_credentials("any-key")
 
         with pytest.raises(HTTPException) as exc_info:

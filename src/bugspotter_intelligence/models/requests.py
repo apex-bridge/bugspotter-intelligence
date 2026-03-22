@@ -98,8 +98,8 @@ class UpdateResolutionRequest(BaseModel):
         return normalize_status_value(v)
 
 
-class CreateAPIKeyRequest(BaseModel):
-    """Request model for creating a new API key"""
+class APIKeyCreateBase(BaseModel):
+    """Shared fields for API key creation requests."""
 
     name: str = Field(
         ...,
@@ -109,42 +109,30 @@ class CreateAPIKeyRequest(BaseModel):
         examples=["Production API Key", "Development Key"],
     )
 
+    rate_limit_per_minute: int = Field(
+        default=60, ge=1, le=10000, description="Requests per minute limit for this key"
+    )
+
+    is_admin: bool = Field(
+        default=False, description="Whether this key has admin privileges"
+    )
+
+
+class CreateAPIKeyRequest(APIKeyCreateBase):
+    """Request model for creating a new API key"""
+
     tenant_id: UUID | None = Field(
         default=None,
         description="Optional. If provided, must match your authenticated tenant ID (returns 403 otherwise). The API key will always be created for your authenticated tenant.",
     )
 
-    rate_limit_per_minute: int = Field(
-        default=60, ge=1, le=10000, description="Requests per minute limit for this key"
-    )
 
-    is_admin: bool = Field(
-        default=False, description="Whether this key has admin privileges"
-    )
-
-
-class CreateTenantAPIKeyRequest(BaseModel):
+class CreateTenantAPIKeyRequest(APIKeyCreateBase):
     """Request model for creating an API key for a specific tenant (master key endpoint).
 
     Unlike CreateAPIKeyRequest, this model omits tenant_id because the tenant
     is supplied via the URL path parameter, not the request body.
     """
-
-    name: str = Field(
-        ...,
-        min_length=1,
-        max_length=100,
-        description="Human-readable name for the key",
-        examples=["org-550e8400-e29b-41d4-a716-446655440000"],
-    )
-
-    rate_limit_per_minute: int = Field(
-        default=60, ge=1, le=10000, description="Requests per minute limit for this key"
-    )
-
-    is_admin: bool = Field(
-        default=False, description="Whether this key has admin privileges"
-    )
 
 
 class SearchRequest(BaseModel):
