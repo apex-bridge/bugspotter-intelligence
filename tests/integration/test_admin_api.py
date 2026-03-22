@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException, Request
+from pydantic import SecretStr
 
 from bugspotter_intelligence.auth.models import APIKey, TenantContext
 
@@ -222,6 +223,123 @@ class TestGetAPIKey:
             )
 
         assert exc_info.value.status_code == 404
+
+
+class TestCreateTenantAPIKey:
+    """Tests for POST /admin/tenants/{tenant_id}/api-keys (master key endpoint)"""
+
+    @pytest.mark.asyncio
+    async def test_creates_key_for_target_tenant(
+        self, mock_db_connection, mock_api_key_service
+    ):
+        """Master key holder can create a key for any tenant"""
+        from bugspotter_intelligence.api.routes.admin import create_tenant_api_key
+        from bugspotter_intelligence.models.requests import CreateTenantAPIKeyRequest
+
+        target_tenant_id = uuid4()
+        body = CreateTenantAPIKeyRequest(name="org-key", rate_limit_per_minute=120)
+
+        response = await create_tenant_api_key(
+            tenant_id=target_tenant_id,
+            body=body,
+            _=None,  # require_master_key already ran as dependency
+            conn=mock_db_connection,
+            service=mock_api_key_service,
+        )
+
+        assert response.plain_key == "bsi_full_key_here"
+        call_kwargs = mock_api_key_service.create_key.call_args.kwargs
+        assert call_kwargs["tenant_id"] == target_tenant_id
+        assert call_kwargs["name"] == "org-key"
+        assert call_kwargs["rate_limit_per_minute"] == 120
+
+    @pytest.mark.asyncio
+    async def test_uses_path_tenant_id_not_body(
+        self, mock_db_connection, mock_api_key_service
+    ):
+        """Tenant ID always comes from path; body has no tenant_id field"""
+        from bugspotter_intelligence.api.routes.admin import create_tenant_api_key
+        from bugspotter_intelligence.models.requests import CreateTenantAPIKeyRequest
+
+        target_tenant_id = uuid4()
+        body = CreateTenantAPIKeyRequest(name="key")
+
+        await create_tenant_api_key(
+            tenant_id=target_tenant_id,
+            body=body,
+            _=None,
+            conn=mock_db_connection,
+            service=mock_api_key_service,
+        )
+
+        call_kwargs = mock_api_key_service.create_key.call_args.kwargs
+        assert call_kwargs["tenant_id"] == target_tenant_id
+
+
+class TestRequireMasterKey:
+    """Tests for require_master_key dependency"""
+
+    def _make_settings(self, key: str | None):
+        from bugspotter_intelligence.config import Settings
+        settings = MagicMock(spec=Settings)
+        settings.master_api_key = SecretStr(key) if key else None
+        return settings
+
+    def _make_credentials(self, token: str):
+        from fastapi.security import HTTPAuthorizationCredentials
+        return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+    @pytest.mark.asyncio
+    async def test_allows_valid_master_key(self):
+        """Should pass through with correct master key"""
+        from bugspotter_intelligence.auth.dependencies import require_master_key
+
+        settings = self._make_settings("correct-master-key")
+        credentials = self._make_credentials("correct-master-key")
+
+        # Should not raise
+        result = await require_master_key(credentials=credentials, settings=settings)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_rejects_wrong_master_key(self):
+        """Should return 401 for wrong key"""
+        from bugspotter_intelligence.auth.dependencies import require_master_key
+
+        settings = self._make_settings("correct-master-key")
+        credentials = self._make_credentials("wrong-key")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await require_master_key(credentials=credentials, settings=settings)
+
+        assert exc_info.value.status_code == 401
+        assert "Invalid master API key" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_rejects_missing_credentials(self):
+        """Should return 401 when no Bearer token provided"""
+        from bugspotter_intelligence.auth.dependencies import require_master_key
+
+        settings = self._make_settings("correct-master-key")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await require_master_key(credentials=None, settings=settings)
+
+        assert exc_info.value.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_returns_503_when_master_key_not_configured(self):
+        """Should return 503 when MASTER_API_KEY is not set on server"""
+        from bugspotter_intelligence.auth.dependencies import require_master_key
+
+        settings = self._make_settings(None)
+        credentials = self._make_credentials("any-key")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await require_master_key(credentials=credentials, settings=settings)
+
+        assert exc_info.value.status_code == 503
+        assert "not configured" in exc_info.value.detail
 
 
 class TestRevokeAPIKey:

@@ -14,7 +14,7 @@ from bugspotter_intelligence.auth import (
 from bugspotter_intelligence.auth.dependencies import require_master_key
 from bugspotter_intelligence.cache import CacheService
 from bugspotter_intelligence.db.database import get_db_connection
-from bugspotter_intelligence.models.requests import CreateAPIKeyRequest
+from bugspotter_intelligence.models.requests import CreateAPIKeyRequest, CreateTenantAPIKeyRequest
 from bugspotter_intelligence.models.responses import (
     APIKeyListResponse,
     APIKeyResponse,
@@ -132,7 +132,7 @@ async def revoke_api_key(
 @router.post("/tenants/{tenant_id}/api-keys", response_model=CreateAPIKeyResponse, status_code=201)
 async def create_tenant_api_key(
     tenant_id: UUID,
-    body: CreateAPIKeyRequest,
+    body: CreateTenantAPIKeyRequest,
     _: None = Depends(require_master_key),
     conn: AsyncConnection = Depends(get_db_connection),
     service: APIKeyService = Depends(get_api_key_service),

@@ -1,5 +1,6 @@
 """Authentication dependencies for FastAPI"""
 
+import secrets
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Security, status
@@ -135,7 +136,9 @@ async def require_master_key(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Master API key not configured on this server",
         )
-    if not credentials or credentials.credentials != settings.master_api_key:
+    if not credentials or not secrets.compare_digest(
+        credentials.credentials, settings.master_api_key.get_secret_value()
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid master API key",

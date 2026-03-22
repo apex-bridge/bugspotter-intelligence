@@ -19,3 +19,6 @@ build/
 
 .DS_Store
 Thumbs.db
+
+# Claude Code local settings (developer-specific, not for repo)
+.claude/settings.local.json
