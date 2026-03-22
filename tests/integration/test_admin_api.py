@@ -252,6 +252,8 @@ class TestCreateTenantAPIKey:
         assert call_kwargs["tenant_id"] == target_tenant_id
         assert call_kwargs["name"] == "org-key"
         assert call_kwargs["rate_limit_per_minute"] == 120
+        # Keys created via master key must always be non-admin
+        assert call_kwargs["is_admin"] is False
 
     @pytest.mark.asyncio
     async def test_uses_path_tenant_id_not_body(

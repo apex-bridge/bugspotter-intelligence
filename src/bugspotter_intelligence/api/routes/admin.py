@@ -148,7 +148,7 @@ async def create_tenant_api_key(
         tenant_id=tenant_id,
         name=body.name,
         rate_limit_per_minute=body.rate_limit_per_minute,
-        is_admin=body.is_admin,
+        is_admin=False,  # master-key provisioned keys are always non-admin
     )
 
     return CreateAPIKeyResponse(

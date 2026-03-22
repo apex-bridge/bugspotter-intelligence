@@ -113,10 +113,6 @@ class APIKeyCreateBase(BaseModel):
         default=60, ge=1, le=10000, description="Requests per minute limit for this key"
     )
 
-    is_admin: bool = Field(
-        default=False, description="Whether this key has admin privileges"
-    )
-
 
 class CreateAPIKeyRequest(APIKeyCreateBase):
     """Request model for creating a new API key"""
@@ -126,12 +122,16 @@ class CreateAPIKeyRequest(APIKeyCreateBase):
         description="Optional. If provided, must match your authenticated tenant ID (returns 403 otherwise). The API key will always be created for your authenticated tenant.",
     )
 
+    is_admin: bool = Field(
+        default=False, description="Whether this key has admin privileges"
+    )
+
 
 class CreateTenantAPIKeyRequest(APIKeyCreateBase):
     """Request model for creating an API key for a specific tenant (master key endpoint).
 
-    Unlike CreateAPIKeyRequest, this model omits tenant_id because the tenant
-    is supplied via the URL path parameter, not the request body.
+    Keys created via this endpoint are always non-admin. The tenant is
+    supplied via the URL path parameter, not the request body.
     """
 
 
