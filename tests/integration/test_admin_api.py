@@ -280,8 +280,9 @@ class TestCreateTenantAPIKey:
         """Regression: FastAPI must accept a flat JSON body, not {\"body\": {...}}.
 
         Direct function calls bypass FastAPI's routing layer and cannot catch
-        body-embedding bugs (e.g. the `_: None = Depends(...)` issue that caused
-        422s in production). This test exercises the full HTTP path.
+        body-embedding bugs (e.g. an unannotated BaseModel parameter in a
+        dependency being counted as an extra body parameter, forcing embedded-body
+        mode and causing 422s in production). This test exercises the full HTTP path.
         """
         from fastapi import FastAPI
         from bugspotter_intelligence.api.routes.admin import router

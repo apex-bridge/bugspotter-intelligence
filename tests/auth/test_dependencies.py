@@ -72,7 +72,7 @@ class TestGetApiKeyService:
         # Reset singleton
         deps._api_key_service = None
 
-        with patch("bugspotter_intelligence.auth.dependencies.Settings", return_value=mock_settings):
+        with patch("bugspotter_intelligence.auth.dependencies._get_settings", return_value=mock_settings):
             service = deps.get_api_key_service()
 
         from bugspotter_intelligence.auth.service import APIKeyService
@@ -82,7 +82,7 @@ class TestGetApiKeyService:
         """Should return same instance on subsequent calls"""
         deps._api_key_service = None
 
-        with patch("bugspotter_intelligence.auth.dependencies.Settings", return_value=mock_settings):
+        with patch("bugspotter_intelligence.auth.dependencies._get_settings", return_value=mock_settings):
             service1 = deps.get_api_key_service()
             service2 = deps.get_api_key_service()
 
