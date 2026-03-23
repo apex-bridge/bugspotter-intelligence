@@ -73,7 +73,7 @@ class TestGetApiKeyService:
         deps._api_key_service = None
 
         with patch("bugspotter_intelligence.auth.dependencies.Settings", return_value=mock_settings):
-            service = deps.get_api_key_service(mock_settings)
+            service = deps.get_api_key_service()
 
         from bugspotter_intelligence.auth.service import APIKeyService
         assert isinstance(service, APIKeyService)
@@ -82,8 +82,9 @@ class TestGetApiKeyService:
         """Should return same instance on subsequent calls"""
         deps._api_key_service = None
 
-        service1 = deps.get_api_key_service(mock_settings)
-        service2 = deps.get_api_key_service(mock_settings)
+        with patch("bugspotter_intelligence.auth.dependencies.Settings", return_value=mock_settings):
+            service1 = deps.get_api_key_service()
+            service2 = deps.get_api_key_service()
 
         assert service1 is service2
 
@@ -126,13 +127,12 @@ class TestGetCurrentTenant:
         self, mock_settings, mock_db_connection, mock_credentials
     ):
         """Should raise 401 when API key is invalid"""
-        deps._api_key_service = None
+        mock_service = MagicMock()
+        mock_service.validate_key = AsyncMock(return_value=None)
 
-        with patch.object(
-            deps.get_api_key_service(mock_settings),
-            "validate_key",
-            new_callable=AsyncMock,
-            return_value=None,
+        with patch(
+            "bugspotter_intelligence.auth.dependencies.get_api_key_service",
+            return_value=mock_service,
         ):
             with pytest.raises(HTTPException) as exc_info:
                 await deps.get_current_tenant(
