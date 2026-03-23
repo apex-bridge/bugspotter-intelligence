@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException, Request
+from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from bugspotter_intelligence.auth.models import APIKey, TenantContext
@@ -242,7 +243,6 @@ class TestCreateTenantAPIKey:
         response = await create_tenant_api_key(
             tenant_id=target_tenant_id,
             body=body,
-            _=None,  # require_master_key already ran as dependency
             conn=mock_db_connection,
             service=mock_api_key_service,
         )
@@ -269,13 +269,50 @@ class TestCreateTenantAPIKey:
         await create_tenant_api_key(
             tenant_id=target_tenant_id,
             body=body,
-            _=None,
             conn=mock_db_connection,
             service=mock_api_key_service,
         )
 
         call_kwargs = mock_api_key_service.create_key.call_args.kwargs
         assert call_kwargs["tenant_id"] == target_tenant_id
+
+    def test_http_accepts_flat_body(self, mock_api_key_service):
+        """Regression: FastAPI must accept a flat JSON body, not {\"body\": {...}}.
+
+        Direct function calls bypass FastAPI's routing layer and cannot catch
+        body-embedding bugs (e.g. an unannotated BaseModel parameter in a
+        dependency being counted as an extra body parameter, forcing embedded-body
+        mode and causing 422s in production). This test exercises the full HTTP path.
+        """
+        from fastapi import FastAPI
+        from bugspotter_intelligence.api.routes.admin import router
+        from bugspotter_intelligence.auth.dependencies import _get_settings, get_api_key_service
+        from bugspotter_intelligence.db.database import get_db_connection
+
+        app = FastAPI()
+        app.include_router(router, prefix="/api/v1")
+
+        master_key = "test-master-key"
+        mock_settings = MagicMock()
+        mock_settings.master_api_key = SecretStr(master_key)
+
+        # Use dependency_overrides so FastAPI's DI resolves these correctly
+        app.dependency_overrides[get_db_connection] = lambda: AsyncMock()
+        app.dependency_overrides[get_api_key_service] = lambda: mock_api_key_service
+        app.dependency_overrides[_get_settings] = lambda: mock_settings
+
+        with TestClient(app) as client:
+            target_tenant_id = uuid4()
+            response = client.post(
+                f"/api/v1/admin/tenants/{target_tenant_id}/api-keys",
+                json={"name": "org-key", "rate_limit_per_minute": 120},
+                headers={"Authorization": f"Bearer {master_key}"},
+            )
+
+        assert response.status_code == 201, (
+            f"Expected 201 with flat body, got {response.status_code}: {response.text}"
+        )
+        assert "plain_key" in response.json()
 
 
 class TestRequireMasterKey:

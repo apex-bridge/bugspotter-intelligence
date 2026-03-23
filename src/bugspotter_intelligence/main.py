@@ -2,6 +2,8 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -88,6 +90,31 @@ def create_app() -> FastAPI:
     app.add_middleware(RateLimitMiddleware, settings=settings)
 
     register_routes(app)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error_handler(request: Request, exc: RequestValidationError):
+        """Log validation errors so they're visible in docker logs.
+
+        The `input` field is stripped from the log line to avoid leaking raw
+        request values (which may include secrets mis-sent in the wrong field).
+        The full errors — including `input` — are still returned to the client
+        so callers can diagnose their own mistakes.
+        """
+        errors = exc.errors()
+        sanitized = [
+            {key: e.get(key) for key in ("loc", "msg", "type")}
+            for e in errors
+        ]
+        logger.warning(
+            "Request validation failed: %s %s — %s",
+            request.method,
+            request.url.path,
+            sanitized,
+        )
+        return JSONResponse(
+            status_code=422,
+            content={"detail": jsonable_encoder(errors)},
+        )
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):

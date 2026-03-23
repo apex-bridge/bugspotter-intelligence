@@ -19,21 +19,16 @@ security = HTTPBearer(auto_error=False)
 _api_key_service: APIKeyService | None = None
 
 
-def get_api_key_service(settings: Settings | None = None) -> APIKeyService:
+def get_api_key_service() -> APIKeyService:
     """
     Get API key service singleton.
-
-    Args:
-        settings: Optional settings (uses global if not provided)
 
     Returns:
         APIKeyService instance
     """
     global _api_key_service
     if _api_key_service is None:
-        if settings is None:
-            settings = Settings()
-        _api_key_service = APIKeyService(key_prefix=settings.api_key_prefix)
+        _api_key_service = APIKeyService(key_prefix=_get_settings().api_key_prefix)
     return _api_key_service
 
 
@@ -80,7 +75,7 @@ async def get_current_tenant(
         )
 
     # Validate the API key
-    service = get_api_key_service(settings)
+    service = get_api_key_service()
     tenant_ctx = await service.validate_key(conn, credentials.credentials)
 
     if not tenant_ctx:
@@ -183,5 +178,5 @@ async def get_optional_tenant(
             rate_limit_per_minute=10000,
         )
 
-    service = get_api_key_service(settings)
+    service = get_api_key_service()
     return await service.validate_key(conn, credentials.credentials)

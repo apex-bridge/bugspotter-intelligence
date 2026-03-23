@@ -129,11 +129,15 @@ async def revoke_api_key(
         )
 
 
-@router.post("/tenants/{tenant_id}/api-keys", response_model=CreateAPIKeyResponse, status_code=201)
+@router.post(
+    "/tenants/{tenant_id}/api-keys",
+    response_model=CreateAPIKeyResponse,
+    status_code=201,
+    dependencies=[Depends(require_master_key)],
+)
 async def create_tenant_api_key(
     tenant_id: UUID,
     body: CreateTenantAPIKeyRequest,
-    _: None = Depends(require_master_key),
     conn: AsyncConnection = Depends(get_db_connection),
     service: APIKeyService = Depends(get_api_key_service),
 ) -> CreateAPIKeyResponse:
