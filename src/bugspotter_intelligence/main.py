@@ -102,7 +102,7 @@ def create_app() -> FastAPI:
         """
         errors = exc.errors()
         sanitized = [
-            {"loc": e.get("loc"), "msg": e.get("msg"), "type": e.get("type")}
+            {key: e.get(key) for key in ("loc", "msg", "type")}
             for e in errors
         ]
         logger.warning(

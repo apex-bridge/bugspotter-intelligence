@@ -276,7 +276,7 @@ class TestCreateTenantAPIKey:
         call_kwargs = mock_api_key_service.create_key.call_args.kwargs
         assert call_kwargs["tenant_id"] == target_tenant_id
 
-    def test_http_accepts_flat_body(self, sample_api_key, mock_api_key_service):
+    def test_http_accepts_flat_body(self, mock_api_key_service):
         """Regression: FastAPI must accept a flat JSON body, not {\"body\": {...}}.
 
         Direct function calls bypass FastAPI's routing layer and cannot catch

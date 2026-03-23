@@ -28,7 +28,7 @@ def get_api_key_service() -> APIKeyService:
     """
     global _api_key_service
     if _api_key_service is None:
-        _api_key_service = APIKeyService(key_prefix=Settings().api_key_prefix)
+        _api_key_service = APIKeyService(key_prefix=_get_settings().api_key_prefix)
     return _api_key_service
 
 
