@@ -2,7 +2,7 @@
 
 RAG (Retrieval-Augmented Generation) service for intelligent bug analysis and deduplication.
 
-[![Tests](https://github.com/apexbridge-tech/bugspotter-intelligence/workflows/Tests/badge.svg)](https://github.com/apexbridge-tech/bugspotter-intelligence/actions) [![Python](https://img.shields.io/badge/python-3.12+-blue)](https://www.python.org/) [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Tests](https://github.com/apex-bridge/bugspotter-intelligence/workflows/Tests/badge.svg)](https://github.com/apex-bridge/bugspotter-intelligence/actions) [![Python](https://img.shields.io/badge/python-3.12+-blue)](https://www.python.org/) [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 ## Features
 
@@ -26,7 +26,7 @@ RAG (Retrieval-Augmented Generation) service for intelligent bug analysis and de
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/apexbridge-tech/bugspotter-intelligence.git
+git clone https://github.com/apex-bridge/bugspotter-intelligence.git
 cd bugspotter-intelligence
 ```
 
@@ -223,7 +223,7 @@ docker run -p 8000:8000 \
 
 ### Integrated with BugSpotter
 
-When deployed alongside the main BugSpotter stack, the intelligence service runs as a Docker Compose profile. See the [Intelligence Integration Guide](https://github.com/apexbridge-tech/bugspotter/blob/main/docs/INTELLIGENCE_INTEGRATION_GUIDE.md) for setup.
+When deployed alongside the main BugSpotter stack, the intelligence service runs as a Docker Compose profile. See the [Intelligence Integration Guide](https://github.com/apex-bridge/bugspotter/blob/main/docs/INTELLIGENCE_INTEGRATION_GUIDE.md) for setup.
 
 ```bash
 # From the main bugspotter repo:
