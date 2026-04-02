@@ -9,11 +9,12 @@ from bugspotter_intelligence.api.deps import (
     get_db_connection,
 )
 from bugspotter_intelligence.auth import TenantContext
-from bugspotter_intelligence.models.requests import AnalyzeBugRequest, UpdateResolutionRequest
+from bugspotter_intelligence.models.requests import AnalyzeBugRequest, EnrichBugRequest, UpdateResolutionRequest
 from bugspotter_intelligence.rate_limiting import check_rate_limit
 from bugspotter_intelligence.models.responses import (
     AnalyzeBugResponse,
     BugDetailResponse,
+    EnrichBugResponse,
     MitigationResponse,
     ResolutionUpdateResponse,
     SimilarBug,
@@ -56,6 +57,31 @@ async def analyze_bug(
         bug_id=result["bug_id"],
         embedding_generated=result["embedding_generated"],
     )
+
+
+@router.post("/enrich", response_model=EnrichBugResponse)
+async def enrich_bug(
+    body: EnrichBugRequest,
+    tenant: TenantContext = Depends(check_rate_limit),
+    service: BugQueryService = Depends(get_bug_query_service),
+) -> EnrichBugResponse:
+    """
+    Enrich a bug with AI-generated metadata.
+
+    Analyzes the bug title, description, console logs, and network logs
+    to generate: category, severity, tags, root cause summary,
+    affected components, and confidence scores.
+    """
+    result = await service.enrich_bug(
+        bug_id=body.bug_id,
+        title=body.title,
+        description=body.description,
+        console_logs=body.console_logs,
+        network_logs=body.network_logs,
+        metadata=body.metadata,
+    )
+
+    return EnrichBugResponse(**result)
 
 
 @router.get("/{bug_id}", response_model=BugDetailResponse)

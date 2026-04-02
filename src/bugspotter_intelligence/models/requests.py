@@ -75,6 +75,40 @@ class AnalyzeBugRequest(BaseModel):
     )
 
 
+class EnrichBugRequest(BaseModel):
+    """Request model for enriching a bug with AI-generated metadata"""
+
+    bug_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="Unique bug identifier",
+    )
+
+    title: str = Field(
+        ...,
+        min_length=1,
+        max_length=500,
+        description="Bug title/summary",
+    )
+
+    description: str | None = Field(
+        default=None, max_length=5000, description="Detailed bug description"
+    )
+
+    console_logs: list[dict] | None = Field(
+        default=None, description="Browser console logs"
+    )
+
+    network_logs: list[dict] | None = Field(
+        default=None, description="Network request logs"
+    )
+
+    metadata: dict | None = Field(
+        default=None, description="Environment metadata (browser, OS, etc.)"
+    )
+
+
 class UpdateResolutionRequest(BaseModel):
     """Request model for updating bug resolution"""
 
