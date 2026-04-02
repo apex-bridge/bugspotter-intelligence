@@ -1,5 +1,6 @@
 """Tests for BugQueryService"""
 
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -221,3 +222,142 @@ class TestBugQueryService:
             # Should have called LLM without context
             call_kwargs = mock_llm_provider.generate.call_args.kwargs
             assert call_kwargs["context"] is None or len(call_kwargs["context"]) == 0
+
+    # ========================================================================
+    # enrich_bug tests
+    # ========================================================================
+
+    @pytest.mark.asyncio
+    async def test_enrich_bug_valid_json(self, query_service, mock_llm_provider):
+        """Should parse valid JSON from LLM and return enrichment data"""
+        mock_llm_provider.generate.return_value = json.dumps({
+            "category": "crash",
+            "severity": "high",
+            "root_cause": "Null pointer in payment processor",
+            "components": ["CheckoutForm", "PaymentService"],
+            "tags": ["null-pointer", "crash"],
+        })
+
+        result = await query_service.enrich_bug(
+            bug_id="bug-001",
+            title="Checkout crashes on submit",
+            description="TypeError when clicking pay",
+        )
+
+        assert result["bug_id"] == "bug-001"
+        assert result["category"] == "crash"
+        assert result["suggested_severity"] == "high"
+        assert result["root_cause_summary"] == "Null pointer in payment processor"
+        assert "CheckoutForm" in result["affected_components"]
+        assert "null-pointer" in result["tags"]
+        assert result["confidence"]["category"] == 0.75
+
+    @pytest.mark.asyncio
+    async def test_enrich_bug_markdown_wrapped_json(self, query_service, mock_llm_provider):
+        """Should extract JSON from markdown code blocks"""
+        mock_llm_provider.generate.return_value = """Here is the analysis:
+
+```json
+{
+  "category": "api",
+  "severity": "medium",
+  "root_cause": "API timeout on slow network",
+  "components": ["APIClient"],
+  "tags": ["timeout"]
+}
+```"""
+
+        result = await query_service.enrich_bug(
+            bug_id="bug-002",
+            title="API call fails intermittently",
+        )
+
+        assert result["category"] == "api"
+        assert result["suggested_severity"] == "medium"
+        assert result["confidence"]["category"] == 0.75
+
+    @pytest.mark.asyncio
+    async def test_enrich_bug_invalid_json_returns_defaults(self, query_service, mock_llm_provider):
+        """Should return defaults when LLM returns unparseable output"""
+        mock_llm_provider.generate.return_value = "I cannot analyze this bug report."
+
+        result = await query_service.enrich_bug(
+            bug_id="bug-003",
+            title="Some bug",
+        )
+
+        assert result["category"] == "other"
+        assert result["suggested_severity"] == "medium"
+        assert result["confidence"]["category"] == 0.2
+
+    @pytest.mark.asyncio
+    async def test_enrich_bug_filters_placeholder_values(self, query_service, mock_llm_provider):
+        """Should filter out placeholder template values from LLM"""
+        mock_llm_provider.generate.return_value = json.dumps({
+            "category": "ui",
+            "severity": "low",
+            "root_cause": "<1-2 sentence summary>",
+            "components": ["<affected component names>"],
+            "tags": ["<descriptive tags>"],
+        })
+
+        result = await query_service.enrich_bug(
+            bug_id="bug-004",
+            title="Button misaligned",
+        )
+
+        assert result["category"] == "ui"
+        assert result["affected_components"] == []  # Placeholder filtered
+        assert result["tags"] == []  # Placeholder filtered
+        assert result["confidence"]["root_cause"] == 0.3  # Low confidence
+
+    @pytest.mark.asyncio
+    async def test_enrich_bug_takes_last_json_block(self, query_service, mock_llm_provider):
+        """Should use the last JSON block when LLM echoes the template"""
+        template_echo = json.dumps({
+            "category": "<one of: ui, api>",
+            "severity": "<one of: critical, high>",
+            "root_cause": "<summary>",
+            "components": ["<names>"],
+            "tags": ["<tags>"],
+        })
+        actual_response = json.dumps({
+            "category": "performance",
+            "severity": "high",
+            "root_cause": "Database query N+1 in user list",
+            "components": ["UserService"],
+            "tags": ["n-plus-one", "performance"],
+        })
+        mock_llm_provider.generate.return_value = (
+            f"Template: {template_echo}\n\nActual: {actual_response}"
+        )
+
+        result = await query_service.enrich_bug(
+            bug_id="bug-005",
+            title="User list loads slowly",
+        )
+
+        assert result["category"] == "performance"
+        assert "UserService" in result["affected_components"]
+
+    # ========================================================================
+    # _parse_enrichment_response unit tests
+    # ========================================================================
+
+    def test_parse_normalizes_category(self, query_service):
+        """Should normalize unknown categories to 'other'"""
+        result = query_service._parse_enrichment_response(
+            "bug-1",
+            json.dumps({"category": "UNKNOWN_CAT", "severity": "high",
+                        "root_cause": "x", "components": [], "tags": []}),
+        )
+        assert result["category"] == "other"
+
+    def test_parse_normalizes_severity(self, query_service):
+        """Should normalize unknown severity to 'medium'"""
+        result = query_service._parse_enrichment_response(
+            "bug-1",
+            json.dumps({"category": "ui", "severity": "EXTREME",
+                        "root_cause": "x", "components": [], "tags": []}),
+        )
+        assert result["suggested_severity"] == "medium"

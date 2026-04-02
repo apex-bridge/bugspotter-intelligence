@@ -1,4 +1,6 @@
-from typing import Optional
+import json
+import re
+from urllib.parse import urlparse
 from uuid import UUID
 
 from psycopg import AsyncConnection
@@ -29,8 +31,8 @@ class BugQueryService:
         self,
         conn: AsyncConnection,
         bug_id: str,
-        tenant_id: Optional[UUID] = None,
-    ) -> Optional[dict]:
+        tenant_id: UUID | None = None,
+    ) -> dict | None:
         """
         Query: Get bug details by ID.
 
@@ -50,7 +52,7 @@ class BugQueryService:
         bug_id: str,
         similarity_threshold: float | None = None,
         limit: int | None = None,
-        tenant_id: Optional[UUID] = None,
+        tenant_id: UUID | None = None,
     ) -> dict:
         """
         Query: Find bugs similar to the given bug.
@@ -121,7 +123,7 @@ class BugQueryService:
         conn: AsyncConnection,
         bug_id: str,
         use_similar_bugs: bool = True,
-        tenant_id: Optional[UUID] = None,
+        tenant_id: UUID | None = None,
     ) -> dict:
         """
         Query: Get AI-powered mitigation suggestion for a bug.
@@ -177,7 +179,7 @@ class BugQueryService:
     async def _generate_mitigation(
             self,
             title: str,
-            description: Optional[str],
+            description: str | None,
             context: list[str]
     ) -> str:
         """Generate AI mitigation suggestion"""
@@ -205,10 +207,10 @@ class BugQueryService:
         self,
         bug_id: str,
         title: str,
-        description: Optional[str] = None,
-        console_logs: Optional[list[dict]] = None,
-        network_logs: Optional[list[dict]] = None,
-        metadata: Optional[dict] = None,
+        description: str | None = None,
+        console_logs: list[dict] | None = None,
+        network_logs: list[dict] | None = None,
+        metadata: dict | None = None,
     ) -> dict:
         """
         Analyze bug and generate enrichment data using the LLM.
@@ -223,26 +225,29 @@ class BugQueryService:
             context_parts.append(f"Description: {description}")
 
         if console_logs:
+            # Filter all logs for errors first, then limit (don't slice before filtering)
             error_logs = [
-                log for log in console_logs[:10]
-                if isinstance(log, dict) and log.get("level") in ("error", "warn")
-            ]
+                log for log in console_logs
+                if isinstance(log, dict)
+                and str(log.get("level", "")).lower() in ("error", "warn")
+            ][:10]
             if error_logs:
                 log_lines = []
                 for log in error_logs[:5]:
                     msg = log.get("message", str(log))
-                    level = log.get("level", "error")
+                    level = str(log.get("level", "error")).lower()
                     log_lines.append(f"[{level}] {str(msg)[:200]}")
-                context_parts.append(f"Console errors:\n" + "\n".join(log_lines))
+                context_parts.append("Console errors:\n" + "\n".join(log_lines))
 
         if network_logs:
+            # Filter all requests for failures first, then limit
             failed_requests = [
-                req for req in network_logs[:10]
+                req for req in network_logs
                 if isinstance(req, dict) and (
                     (isinstance(req.get("status"), int) and req["status"] >= 400)
                     or req.get("error")
                 )
-            ]
+            ][:10]
             if failed_requests:
                 net_lines = []
                 for req in failed_requests[:5]:
@@ -250,13 +255,21 @@ class BugQueryService:
                     url = str(req.get("url", "?"))[:100]
                     status = req.get("status", "?")
                     net_lines.append(f"{method} {url} → {status}")
-                context_parts.append(f"Failed network requests:\n" + "\n".join(net_lines))
+                context_parts.append("Failed network requests:\n" + "\n".join(net_lines))
 
         if metadata:
             meta_parts = []
-            for key in ("browser", "os", "url", "viewport"):
+            for key in ("browser", "os", "viewport"):
                 if key in metadata:
                     meta_parts.append(f"{key}: {metadata[key]}")
+            # Strip URL to path only — avoid leaking domains/query params
+            if "url" in metadata:
+                try:
+                    page_path = urlparse(str(metadata["url"])).path or ""
+                    if page_path:
+                        meta_parts.append(f"page: {page_path[:100]}")
+                except ValueError:
+                    pass
             if meta_parts:
                 context_parts.append(f"Environment: {', '.join(meta_parts)}")
 
@@ -285,18 +298,26 @@ Return this exact JSON structure:
 
     def _parse_enrichment_response(self, bug_id: str, raw: str) -> dict:
         """Parse LLM JSON response into enrichment format with confidence scores."""
-        import json
-        import re
-
-        # Extract JSON from response (LLM sometimes wraps in markdown)
-        json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', raw, re.DOTALL)
-        if not json_match:
-            # Fallback: return defaults
-            return self._default_enrichment(bug_id)
-
+        # Try direct parse first, then extract from markdown
+        parsed = None
         try:
-            parsed = json.loads(json_match.group())
+            parsed = json.loads(raw.strip())
         except json.JSONDecodeError:
+            pass
+
+        if parsed is None:
+            # Extract JSON blocks — take the last one (LLM may echo the template first)
+            json_blocks = re.findall(
+                r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', raw, re.DOTALL
+            )
+            for candidate in reversed(json_blocks):
+                try:
+                    parsed = json.loads(candidate)
+                    break
+                except json.JSONDecodeError:
+                    continue
+
+        if not isinstance(parsed, dict):
             return self._default_enrichment(bug_id)
 
         # Validate and normalize fields
@@ -314,21 +335,34 @@ Return this exact JSON structure:
         if severity not in valid_severities:
             severity = "medium"
 
-        root_cause = str(parsed.get("root_cause", "Unable to determine root cause"))[:500]
+        raw_root_cause = parsed.get("root_cause")
+        if isinstance(raw_root_cause, str):
+            root_cause = raw_root_cause.strip()[:500]
+        else:
+            root_cause = ""
 
-        components = parsed.get("components", [])
-        if not isinstance(components, list):
-            components = []
-        components = [str(c)[:100] for c in components[:10]]
+        components = []
+        for c in (parsed.get("components") or [])[:10]:
+            if not isinstance(c, str):
+                continue
+            cleaned = c.strip()
+            if cleaned and not cleaned.startswith("<"):
+                components.append(cleaned[:100])
 
-        tags = parsed.get("tags", [])
-        if not isinstance(tags, list):
-            tags = []
-        tags = [str(t)[:50] for t in tags[:10]]
+        tags = []
+        for t in (parsed.get("tags") or [])[:10]:
+            if not isinstance(t, str):
+                continue
+            cleaned = t.strip()
+            if cleaned and not cleaned.startswith("<"):
+                tags.append(cleaned[:50])
 
-        # Confidence: higher when LLM provided structured output
-        has_root_cause = root_cause != "Unable to determine root cause"
+        # Confidence: higher when LLM provided real (non-placeholder) output
+        has_root_cause = bool(root_cause) and not root_cause.startswith("<")
         base_confidence = 0.75 if has_root_cause else 0.5
+
+        if not has_root_cause:
+            root_cause = "Unable to determine root cause"
 
         return {
             "bug_id": bug_id,
