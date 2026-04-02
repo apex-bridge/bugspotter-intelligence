@@ -1,6 +1,5 @@
 import json
 import re
-from typing import Optional
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -32,8 +31,8 @@ class BugQueryService:
         self,
         conn: AsyncConnection,
         bug_id: str,
-        tenant_id: Optional[UUID] = None,
-    ) -> Optional[dict]:
+        tenant_id: UUID | None = None,
+    ) -> dict | None:
         """
         Query: Get bug details by ID.
 
@@ -53,7 +52,7 @@ class BugQueryService:
         bug_id: str,
         similarity_threshold: float | None = None,
         limit: int | None = None,
-        tenant_id: Optional[UUID] = None,
+        tenant_id: UUID | None = None,
     ) -> dict:
         """
         Query: Find bugs similar to the given bug.
@@ -124,7 +123,7 @@ class BugQueryService:
         conn: AsyncConnection,
         bug_id: str,
         use_similar_bugs: bool = True,
-        tenant_id: Optional[UUID] = None,
+        tenant_id: UUID | None = None,
     ) -> dict:
         """
         Query: Get AI-powered mitigation suggestion for a bug.
@@ -180,7 +179,7 @@ class BugQueryService:
     async def _generate_mitigation(
             self,
             title: str,
-            description: Optional[str],
+            description: str | None,
             context: list[str]
     ) -> str:
         """Generate AI mitigation suggestion"""
@@ -266,9 +265,10 @@ class BugQueryService:
             # Strip URL to path only — avoid leaking domains/query params
             if "url" in metadata:
                 try:
-                    parsed_url = urlparse(str(metadata["url"]))
-                    meta_parts.append(f"page: {parsed_url.path}")
-                except Exception:
+                    page_path = urlparse(str(metadata["url"])).path or ""
+                    if page_path:
+                        meta_parts.append(f"page: {page_path[:100]}")
+                except ValueError:
                     pass
             if meta_parts:
                 context_parts.append(f"Environment: {', '.join(meta_parts)}")
@@ -335,24 +335,27 @@ Return this exact JSON structure:
         if severity not in valid_severities:
             severity = "medium"
 
-        root_cause = str(parsed.get("root_cause", ""))[:500]
+        raw_root_cause = parsed.get("root_cause")
+        if isinstance(raw_root_cause, str):
+            root_cause = raw_root_cause.strip()[:500]
+        else:
+            root_cause = ""
 
-        components = parsed.get("components", [])
-        if not isinstance(components, list):
-            components = []
-        # Filter out placeholder values like "<affected component names>"
-        components = [
-            str(c)[:100] for c in components[:10]
-            if isinstance(c, str) and not c.startswith("<")
-        ]
+        components = []
+        for c in (parsed.get("components") or [])[:10]:
+            if not isinstance(c, str):
+                continue
+            cleaned = c.strip()
+            if cleaned and not cleaned.startswith("<"):
+                components.append(cleaned[:100])
 
-        tags = parsed.get("tags", [])
-        if not isinstance(tags, list):
-            tags = []
-        tags = [
-            str(t)[:50] for t in tags[:10]
-            if isinstance(t, str) and not t.startswith("<")
-        ]
+        tags = []
+        for t in (parsed.get("tags") or [])[:10]:
+            if not isinstance(t, str):
+                continue
+            cleaned = t.strip()
+            if cleaned and not cleaned.startswith("<"):
+                tags.append(cleaned[:50])
 
         # Confidence: higher when LLM provided real (non-placeholder) output
         has_root_cause = bool(root_cause) and not root_cause.startswith("<")
