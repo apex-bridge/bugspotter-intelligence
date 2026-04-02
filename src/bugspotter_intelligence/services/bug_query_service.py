@@ -200,3 +200,166 @@ class BugQueryService:
         )
 
         return suggestion
+
+    async def enrich_bug(
+        self,
+        bug_id: str,
+        title: str,
+        description: Optional[str] = None,
+        console_logs: Optional[list[dict]] = None,
+        network_logs: Optional[list[dict]] = None,
+        metadata: Optional[dict] = None,
+    ) -> dict:
+        """
+        Analyze bug and generate enrichment data using the LLM.
+
+        Returns category, severity, tags, root cause summary,
+        affected components, and confidence scores.
+        """
+        # Build context from all available bug data
+        context_parts = [f"Title: {title}"]
+
+        if description:
+            context_parts.append(f"Description: {description}")
+
+        if console_logs:
+            error_logs = [
+                log for log in console_logs[:10]
+                if isinstance(log, dict) and log.get("level") in ("error", "warn")
+            ]
+            if error_logs:
+                log_lines = []
+                for log in error_logs[:5]:
+                    msg = log.get("message", str(log))
+                    level = log.get("level", "error")
+                    log_lines.append(f"[{level}] {str(msg)[:200]}")
+                context_parts.append(f"Console errors:\n" + "\n".join(log_lines))
+
+        if network_logs:
+            failed_requests = [
+                req for req in network_logs[:10]
+                if isinstance(req, dict) and (
+                    (isinstance(req.get("status"), int) and req["status"] >= 400)
+                    or req.get("error")
+                )
+            ]
+            if failed_requests:
+                net_lines = []
+                for req in failed_requests[:5]:
+                    method = req.get("method", "?")
+                    url = str(req.get("url", "?"))[:100]
+                    status = req.get("status", "?")
+                    net_lines.append(f"{method} {url} → {status}")
+                context_parts.append(f"Failed network requests:\n" + "\n".join(net_lines))
+
+        if metadata:
+            meta_parts = []
+            for key in ("browser", "os", "url", "viewport"):
+                if key in metadata:
+                    meta_parts.append(f"{key}: {metadata[key]}")
+            if meta_parts:
+                context_parts.append(f"Environment: {', '.join(meta_parts)}")
+
+        bug_context = "\n\n".join(context_parts)
+
+        prompt = f"""Analyze this software bug report and classify it. Respond ONLY with valid JSON, no other text.
+
+{bug_context}
+
+Return this exact JSON structure:
+{{
+  "category": "<one of: ui, api, performance, authentication, database, network, crash, validation, security, other>",
+  "severity": "<one of: critical, high, medium, low>",
+  "root_cause": "<1-2 sentence summary of the likely root cause>",
+  "components": ["<affected component names, e.g. CheckoutForm, PaymentService>"],
+  "tags": ["<descriptive tags, e.g. null-pointer, race-condition, timeout>"]
+}}"""
+
+        raw_response = await self.llm.generate(
+            prompt=prompt,
+            temperature=0.2,
+            max_tokens=400,
+        )
+
+        return self._parse_enrichment_response(bug_id, raw_response)
+
+    def _parse_enrichment_response(self, bug_id: str, raw: str) -> dict:
+        """Parse LLM JSON response into enrichment format with confidence scores."""
+        import json
+        import re
+
+        # Extract JSON from response (LLM sometimes wraps in markdown)
+        json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', raw, re.DOTALL)
+        if not json_match:
+            # Fallback: return defaults
+            return self._default_enrichment(bug_id)
+
+        try:
+            parsed = json.loads(json_match.group())
+        except json.JSONDecodeError:
+            return self._default_enrichment(bug_id)
+
+        # Validate and normalize fields
+        valid_categories = {
+            "ui", "api", "performance", "authentication", "database",
+            "network", "crash", "validation", "security", "other",
+        }
+        valid_severities = {"critical", "high", "medium", "low"}
+
+        category = str(parsed.get("category", "other")).lower()
+        if category not in valid_categories:
+            category = "other"
+
+        severity = str(parsed.get("severity", "medium")).lower()
+        if severity not in valid_severities:
+            severity = "medium"
+
+        root_cause = str(parsed.get("root_cause", "Unable to determine root cause"))[:500]
+
+        components = parsed.get("components", [])
+        if not isinstance(components, list):
+            components = []
+        components = [str(c)[:100] for c in components[:10]]
+
+        tags = parsed.get("tags", [])
+        if not isinstance(tags, list):
+            tags = []
+        tags = [str(t)[:50] for t in tags[:10]]
+
+        # Confidence: higher when LLM provided structured output
+        has_root_cause = root_cause != "Unable to determine root cause"
+        base_confidence = 0.75 if has_root_cause else 0.5
+
+        return {
+            "bug_id": bug_id,
+            "category": category,
+            "suggested_severity": severity,
+            "tags": tags,
+            "root_cause_summary": root_cause,
+            "affected_components": components,
+            "confidence": {
+                "category": base_confidence,
+                "severity": base_confidence,
+                "tags": base_confidence * 0.9,
+                "root_cause": base_confidence if has_root_cause else 0.3,
+                "components": base_confidence * 0.85 if components else 0.2,
+            },
+        }
+
+    def _default_enrichment(self, bug_id: str) -> dict:
+        """Return default enrichment when LLM parsing fails."""
+        return {
+            "bug_id": bug_id,
+            "category": "other",
+            "suggested_severity": "medium",
+            "tags": [],
+            "root_cause_summary": "Unable to determine root cause from available data",
+            "affected_components": [],
+            "confidence": {
+                "category": 0.2,
+                "severity": 0.2,
+                "tags": 0.1,
+                "root_cause": 0.1,
+                "components": 0.1,
+            },
+        }

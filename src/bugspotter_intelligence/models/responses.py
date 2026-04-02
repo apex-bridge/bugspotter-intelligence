@@ -53,6 +53,28 @@ class MitigationResponse(BaseModel):
     based_on_similar_bugs: bool
 
 
+class EnrichmentConfidence(BaseModel):
+    """Confidence scores for enrichment fields"""
+
+    category: float = Field(..., ge=0.0, le=1.0)
+    severity: float = Field(..., ge=0.0, le=1.0)
+    tags: float = Field(..., ge=0.0, le=1.0)
+    root_cause: float = Field(..., ge=0.0, le=1.0)
+    components: float = Field(..., ge=0.0, le=1.0)
+
+
+class EnrichBugResponse(BaseModel):
+    """Response model for bug enrichment"""
+
+    bug_id: str
+    category: str
+    suggested_severity: str
+    tags: list[str]
+    root_cause_summary: str
+    affected_components: list[str]
+    confidence: EnrichmentConfidence
+
+
 class BugDetailResponse(BaseModel):
     """Response model for bug details"""
 
