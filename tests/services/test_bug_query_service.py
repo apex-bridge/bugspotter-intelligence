@@ -48,7 +48,7 @@ class TestBugQueryService:
         """Should use default similarity threshold from settings"""
         # Mock database responses
         cursor = mock_db_connection.cursor.return_value.__aenter__.return_value
-        cursor.fetchone.return_value = ([0.1] * 384,)  # Mock embedding
+        cursor.fetchone.return_value = ([0.1] * 1024,)  # Mock embedding
 
         mock_similar = [
             {"bug_id": "bug-002", "title": "Similar bug", "similarity": 0.85}
@@ -72,7 +72,7 @@ class TestBugQueryService:
     ):
         """Should use provided threshold when overridden"""
         cursor = mock_db_connection.cursor.return_value.__aenter__.return_value
-        cursor.fetchone.return_value = ([0.1] * 384,)
+        cursor.fetchone.return_value = ([0.1] * 1024,)
 
         with patch.object(query_service.repo, 'get_bug', new_callable=AsyncMock, return_value={"bug_id": "bug-001"}):
             with patch.object(query_service.repo, 'find_similar', new_callable=AsyncMock, return_value=[]):
@@ -92,7 +92,7 @@ class TestBugQueryService:
     ):
         """Should mark as duplicate when similarity >= duplicate_threshold"""
         cursor = mock_db_connection.cursor.return_value.__aenter__.return_value
-        cursor.fetchone.return_value = ([0.1] * 384,)
+        cursor.fetchone.return_value = ([0.1] * 1024,)
 
         # Very similar bug (>= 0.90)
         mock_similar = [
@@ -116,7 +116,7 @@ class TestBugQueryService:
     ):
         """Should not mark as duplicate when similarity < duplicate_threshold"""
         cursor = mock_db_connection.cursor.return_value.__aenter__.return_value
-        cursor.fetchone.return_value = ([0.1] * 384,)
+        cursor.fetchone.return_value = ([0.1] * 1024,)
 
         # Somewhat similar but not duplicate (< 0.90)
         mock_similar = [
@@ -140,7 +140,7 @@ class TestBugQueryService:
     ):
         """Should pass exclude_bug_id to repository to filter out self"""
         cursor = mock_db_connection.cursor.return_value.__aenter__.return_value
-        cursor.fetchone.return_value = ([0.1] * 384,)
+        cursor.fetchone.return_value = ([0.1] * 1024,)
 
         # Repo returns only other bugs (already filtered by exclude_bug_id)
         mock_similar = [

@@ -30,9 +30,9 @@ def mock_llm_provider():
 def mock_embedding_provider():
     """Mock embedding provider"""
     provider = MagicMock(spec=EmbeddingProvider)
-    provider.embed = MagicMock(return_value=[0.1] * 384)  # Mock embedding vector
-    provider.embed_batch = MagicMock(return_value=[[0.1] * 384, [0.2] * 384])
-    provider.dimension = MagicMock(return_value=384)
+    provider.embed = MagicMock(return_value=[0.1] * 1024)  # Mock embedding vector
+    provider.embed_batch = MagicMock(return_value=[[0.1] * 1024, [0.2] * 1024])
+    provider.dimension = MagicMock(return_value=1024)
     provider.provider_name = "mock"
     return provider
 
