@@ -125,7 +125,7 @@ async def create_tables(conn: AsyncConnection) -> None:
                                  embedding
                                  VECTOR
                              (
-                                 384
+                                 1024
                              ),
                                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                                  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
