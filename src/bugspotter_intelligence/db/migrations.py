@@ -1,6 +1,9 @@
 """Database migrations and schema setup"""
 
+import logging
 from psycopg import AsyncConnection
+
+logger = logging.getLogger(__name__)
 
 
 async def create_api_keys_table(conn: AsyncConnection) -> None:
@@ -100,7 +103,30 @@ async def create_tables(conn: AsyncConnection) -> None:
         # Enable pgvector extension
         await cursor.execute("CREATE EXTENSION IF NOT EXISTS vector;")
 
-        # Create bug_embeddings table
+        # Migrate embedding dimension if table exists with wrong size.
+        # Use format_type() to reliably get "vector(N)" string, since
+        # atttypmod encodes metadata (not raw dimension).
+        target_dim = 1024
+        await cursor.execute("""
+            SELECT format_type(atttypid, atttypmod) AS col_type
+            FROM pg_attribute
+            WHERE attrelid = to_regclass('bug_embeddings')
+            AND attname = 'embedding'
+        """)
+        row = await cursor.fetchone()
+        if row is not None and row[0] is not None:
+            col_type = row[0]  # e.g. "vector(384)" or "vector(1024)"
+            import re
+            dim_match = re.search(r'vector\((\d+)\)', col_type)
+            current_dim = int(dim_match.group(1)) if dim_match else None
+            if current_dim is not None and current_dim != target_dim:
+                logger.info(f"Migrating bug_embeddings.embedding from {current_dim}d to {target_dim}d")
+                await cursor.execute("DROP INDEX IF EXISTS bug_embeddings_embedding_idx;")
+                await cursor.execute("ALTER TABLE bug_embeddings DROP COLUMN embedding;")
+                await cursor.execute(f"ALTER TABLE bug_embeddings ADD COLUMN embedding VECTOR({target_dim});")
+                logger.info("Migration complete — existing embeddings dropped. Re-embed all bugs.")
+
+        # Create bug_embeddings table (for fresh installs)
         await cursor.execute("""
                              CREATE TABLE IF NOT EXISTS bug_embeddings
                              (
@@ -125,7 +151,7 @@ async def create_tables(conn: AsyncConnection) -> None:
                                  embedding
                                  VECTOR
                              (
-                                 384
+                                 1024
                              ),
                                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                                  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

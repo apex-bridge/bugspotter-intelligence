@@ -13,7 +13,7 @@ class LocalEmbeddingProvider(EmbeddingProvider):
     Can be extended later with OpenAI, Cohere, etc.
     """
 
-    DEFAULT_MODEL = "all-MiniLM-L6-v2"
+    DEFAULT_MODEL = "BAAI/bge-m3"
 
     def __init__(self, model_name: str | None = None):
         self.model_name = model_name or self.DEFAULT_MODEL

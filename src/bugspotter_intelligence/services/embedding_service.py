@@ -16,8 +16,8 @@ class EmbeddingService:
     - OpenAI/Anthropic embeddings
     """
 
-    # Default model - good balance of speed and quality
-    DEFAULT_MODEL = "all-MiniLM-L6-v2"
+    # Default model - high-quality multilingual embeddings (1024d, ~268ms per embed)
+    DEFAULT_MODEL = "BAAI/bge-m3"
 
     def __init__(self, model_name: str | None = None):
         """
@@ -25,7 +25,7 @@ class EmbeddingService:
 
         Args:
             model_name: Sentence-transformers model name
-                       Defaults to 'all-MiniLM-L6-v2' (384 dimensions)
+                       Defaults to 'BAAI/bge-m3' (1024 dimensions)
         """
         self.model_name = model_name or self.DEFAULT_MODEL
         self._model = None  # Lazy loading
@@ -57,7 +57,7 @@ class EmbeddingService:
             >>> service = EmbeddingService()
             >>> embedding = service.embed("App crashes on login")
             >>> len(embedding)
-            384
+            1024
         """
         if not text or not text.strip():
             raise ValueError("Text cannot be empty")

@@ -1,4 +1,9 @@
-"""Test suite for embedding service"""
+"""Test suite for embedding service
+
+Tests marked @pytest.mark.integration require downloading the real model
+and are slow (~30s first run). Run with: pytest -m integration
+Unit tests use mock providers and are fast.
+"""
 
 import pytest
 import numpy as np
@@ -8,8 +13,9 @@ from bugspotter_intelligence.services.embeddings import (
 )
 
 
+@pytest.mark.integration
 class TestLocalEmbeddingProvider:
-    """Test suite for LocalEmbeddingProvider"""
+    """Integration tests for LocalEmbeddingProvider (requires real model download)"""
 
     @pytest.fixture
     def provider(self):
@@ -18,7 +24,7 @@ class TestLocalEmbeddingProvider:
 
     def test_provider_initialization(self, provider):
         """Should initialize with default model"""
-        assert provider.model_name == "all-MiniLM-L6-v2"
+        assert provider.model_name == "BAAI/bge-m3"
         assert provider.provider_name == "local"
 
     def test_custom_model_initialization(self):
@@ -41,7 +47,7 @@ class TestLocalEmbeddingProvider:
     def test_dimension(self, provider):
         """Should return correct embedding dimension"""
         dimension = provider.dimension()
-        assert dimension == 384  # all-MiniLM-L6-v2 has 384 dimensions
+        assert dimension == 1024  # BAAI/bge-m3 has 1024 dimensions
         assert isinstance(dimension, int)
 
     def test_embed_single_text(self, provider):
@@ -50,7 +56,7 @@ class TestLocalEmbeddingProvider:
         embedding = provider.embed(text)
 
         assert isinstance(embedding, list)
-        assert len(embedding) == 384
+        assert len(embedding) == 1024
         assert all(isinstance(x, float) for x in embedding)
 
     def test_embed_empty_text_raises_error(self, provider):
@@ -72,7 +78,7 @@ class TestLocalEmbeddingProvider:
         embeddings = provider.embed_batch(texts)
 
         assert len(embeddings) == 3
-        assert all(len(emb) == 384 for emb in embeddings)
+        assert all(len(emb) == 1024 for emb in embeddings)
         assert all(isinstance(emb, list) for emb in embeddings)
 
     def test_embed_batch_empty_list_raises_error(self, provider):
@@ -167,7 +173,7 @@ class TestLocalEmbeddingProvider:
         # Should successfully generate embedding
         embedding = provider.embed(embedding_text)
 
-        assert len(embedding) == 384
+        assert len(embedding) == 1024
         assert all(isinstance(x, float) for x in embedding)
 
     @staticmethod

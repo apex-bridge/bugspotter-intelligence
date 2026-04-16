@@ -84,7 +84,7 @@ class TestSearchFast:
     ):
         """Should pass the generated embedding to the repository"""
         tid = uuid4()
-        expected_embedding = [0.1] * 384
+        expected_embedding = [0.1] * 1024
 
         with patch(
             "bugspotter_intelligence.services.search_service.BugRepository.search",

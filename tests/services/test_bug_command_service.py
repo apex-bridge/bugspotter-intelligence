@@ -156,7 +156,7 @@ class TestBugCommandService:
             mock_embedding_provider
     ):
         """Should store the exact embedding returned by provider"""
-        mock_embedding = [0.5] * 384
+        mock_embedding = [0.5] * 1024
         mock_embedding_provider.embed.return_value = mock_embedding
 
         with patch.object(command_service.repo, 'insert_bug', new_callable=AsyncMock) as mock_insert:

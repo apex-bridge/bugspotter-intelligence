@@ -46,7 +46,7 @@ class TestBugRepositoryTenantIsolation:
             bug_id="bug-001",
             title="Test Bug",
             description="Test description",
-            embedding=[0.1] * 384,
+            embedding=[0.1] * 1024,
             tenant_id=tenant_a_id,
         )
 
@@ -63,7 +63,7 @@ class TestBugRepositoryTenantIsolation:
 
         await BugRepository.find_similar(
             conn=mock_db_connection,
-            embedding=[0.1] * 384,
+            embedding=[0.1] * 1024,
             tenant_id=tenant_a_id,
         )
 
@@ -80,7 +80,7 @@ class TestBugRepositoryTenantIsolation:
 
         await BugRepository.find_similar(
             conn=mock_db_connection,
-            embedding=[0.1] * 384,
+            embedding=[0.1] * 1024,
             tenant_id=tenant_a_id,
         )
 
@@ -179,7 +179,7 @@ class TestBugRepositoryTenantIsolation:
 
         await BugRepository.find_similar(
             conn=mock_db_connection,
-            embedding=[0.1] * 384,
+            embedding=[0.1] * 1024,
             exclude_bug_id="bug-001",
         )
 
