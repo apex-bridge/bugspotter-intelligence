@@ -1,4 +1,9 @@
-"""Test suite for embedding service"""
+"""Test suite for embedding service
+
+Tests marked @pytest.mark.integration require downloading the real model
+and are slow (~30s first run). Run with: pytest -m integration
+Unit tests use mock providers and are fast.
+"""
 
 import pytest
 import numpy as np
@@ -8,8 +13,9 @@ from bugspotter_intelligence.services.embeddings import (
 )
 
 
+@pytest.mark.integration
 class TestLocalEmbeddingProvider:
-    """Test suite for LocalEmbeddingProvider"""
+    """Integration tests for LocalEmbeddingProvider (requires real model download)"""
 
     @pytest.fixture
     def provider(self):
@@ -41,7 +47,7 @@ class TestLocalEmbeddingProvider:
     def test_dimension(self, provider):
         """Should return correct embedding dimension"""
         dimension = provider.dimension()
-        assert dimension == 1024  # BAAI/bge-m3 has 384 dimensions
+        assert dimension == 1024  # BAAI/bge-m3 has 1024 dimensions
         assert isinstance(dimension, int)
 
     def test_embed_single_text(self, provider):

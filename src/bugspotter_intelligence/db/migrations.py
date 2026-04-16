@@ -1,6 +1,9 @@
 """Database migrations and schema setup"""
 
+import logging
 from psycopg import AsyncConnection
+
+logger = logging.getLogger(__name__)
 
 
 async def create_api_keys_table(conn: AsyncConnection) -> None:
@@ -100,7 +103,23 @@ async def create_tables(conn: AsyncConnection) -> None:
         # Enable pgvector extension
         await cursor.execute("CREATE EXTENSION IF NOT EXISTS vector;")
 
-        # Create bug_embeddings table
+        # Migrate embedding dimension if table exists with wrong size
+        await cursor.execute("""
+            SELECT atttypmod FROM pg_attribute
+            WHERE attrelid = 'bug_embeddings'::regclass
+            AND attname = 'embedding'
+        """)
+        row = await cursor.fetchone()
+        if row is not None:
+            current_dim = row[0]
+            if current_dim != 1024:
+                logger.info(f"Migrating bug_embeddings.embedding from {current_dim}d to 1024d")
+                await cursor.execute("DROP INDEX IF EXISTS bug_embeddings_embedding_idx;")
+                await cursor.execute("ALTER TABLE bug_embeddings DROP COLUMN embedding;")
+                await cursor.execute("ALTER TABLE bug_embeddings ADD COLUMN embedding VECTOR(1024);")
+                logger.info("Migration complete — existing embeddings dropped. Re-embed all bugs.")
+
+        # Create bug_embeddings table (for fresh installs)
         await cursor.execute("""
                              CREATE TABLE IF NOT EXISTS bug_embeddings
                              (
