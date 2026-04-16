@@ -9,7 +9,8 @@ from bugspotter_intelligence.db.database import get_db_connection
 from bugspotter_intelligence.llm import LLMProvider, create_llm_provider
 from bugspotter_intelligence.cache import CacheService, get_cache_service
 from bugspotter_intelligence.services import BugCommandService, BugQueryService, SearchService
-from bugspotter_intelligence.services.embeddings import EmbeddingProvider, LocalEmbeddingProvider
+from bugspotter_intelligence.services.embeddings import EmbeddingProvider
+from bugspotter_intelligence.services.embeddings.factory import create_embedding_provider
 from bugspotter_intelligence.services.reranker import LLMReranker
 
 logger = logging.getLogger(__name__)
@@ -38,10 +39,11 @@ def get_llm_provider() -> LLMProvider:
 
 
 def get_embedding_provider() -> EmbeddingProvider:
-    """Get embedding provider singleton"""
+    """Get embedding provider singleton (uses settings for model/provider selection)"""
     global _embedding_provider
     if _embedding_provider is None:
-        _embedding_provider = LocalEmbeddingProvider()
+        settings = get_settings()
+        _embedding_provider = create_embedding_provider(settings)
     return _embedding_provider
 
 
