@@ -106,11 +106,11 @@ async def create_tables(conn: AsyncConnection) -> None:
         # Migrate embedding dimension if table exists with wrong size
         await cursor.execute("""
             SELECT atttypmod FROM pg_attribute
-            WHERE attrelid = 'bug_embeddings'::regclass
+            WHERE attrelid = to_regclass('bug_embeddings')
             AND attname = 'embedding'
         """)
         row = await cursor.fetchone()
-        if row is not None:
+        if row is not None and row[0] is not None:
             current_dim = row[0]
             if current_dim != 1024:
                 logger.info(f"Migrating bug_embeddings.embedding from {current_dim}d to 1024d")
