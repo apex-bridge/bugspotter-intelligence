@@ -16,7 +16,7 @@ class EmbeddingService:
     - OpenAI/Anthropic embeddings
     """
 
-    # Default model - good balance of speed and quality
+    # Default model - high-quality multilingual embeddings (1024d, ~268ms per embed)
     DEFAULT_MODEL = "BAAI/bge-m3"
 
     def __init__(self, model_name: str | None = None):
