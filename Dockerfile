@@ -28,13 +28,20 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir .
 
-# Pre-download the embedding model in the builder stage for better cache
-# (source code changes won't re-download the ~90MB model)
+# Pre-download the active embedding model in the builder stage. Baking
+# the model into the image trades a larger image (~3 GB total vs ~1 GB)
+# for predictable cold starts: no HF Hub download on first request, no
+# OOM-risk window where lazy load races against the worker timeout.
+#
+# IMPORTANT: this MUST match db/migrations.py target_dim and the active
+# EMBEDDING_MODEL passed via env. Currently BAAI/bge-m3 (1024-dim,
+# ~2.3 GB on disk). When changing models, update target_dim in
+# migrations.py *and* this line in the same commit.
 ENV SENTENCE_TRANSFORMERS_HOME=/app/.cache \
     HF_HOME=/app/.cache/huggingface \
     TORCH_HOME=/app/.cache/torch
 RUN mkdir -p /app/.cache/huggingface /app/.cache/torch && \
-    python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+    python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-m3')"
 
 # ============================================================================
 # Stage 2: Production
@@ -57,24 +64,30 @@ WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy pre-downloaded model cache from builder
+# Copy pre-downloaded model cache from builder, owned by the runtime
+# user up front (avoids a second 2.3 GB layer that a separate `chown
+# -R` would otherwise produce). TRANSFORMERS_OFFLINE=1 forbids
+# huggingface_hub from making any network calls — the model is on
+# disk, we never want to silently re-download or hit Hub rate limits
+# at runtime.
 ENV SENTENCE_TRANSFORMERS_HOME=/app/.cache \
     HF_HOME=/app/.cache/huggingface \
-    TORCH_HOME=/app/.cache/torch
-COPY --from=builder /app/.cache /app/.cache
+    TORCH_HOME=/app/.cache/torch \
+    TRANSFORMERS_OFFLINE=1 \
+    HF_HUB_OFFLINE=1
+COPY --from=builder --chown=bugspotter:bugspotter /app/.cache /app/.cache
 
 # Copy LICENSE (MIT compliance requires inclusion in distributed software)
 COPY LICENSE ./
-
-# Set ownership of cache directory for non-root user
-RUN chown -R bugspotter:bugspotter /app/.cache
 
 # Switch to non-root user
 USER bugspotter
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+# start-period covers the lazy-load of BGE-M3 from the baked cache
+# (~5-15s cold) plus any first-request overhead.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://127.0.0.1:8000/health || exit 1
 
 CMD ["uvicorn", "bugspotter_intelligence.main:app", "--host", "0.0.0.0", "--port", "8000"]
