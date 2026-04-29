@@ -28,13 +28,20 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir .
 
-# Pre-download the embedding model in the builder stage for better cache
-# (source code changes won't re-download the ~90MB model)
+# Pre-download the active embedding model in the builder stage. Baking
+# the model into the image trades a larger image (~3 GB total vs ~1 GB)
+# for predictable cold starts: no HF Hub download on first request, no
+# OOM-risk window where lazy load races against the worker timeout.
+#
+# IMPORTANT: this MUST match db/migrations.py target_dim and the active
+# EMBEDDING_MODEL passed via env. Currently BAAI/bge-m3 (1024-dim,
+# ~2.3 GB on disk). When changing models, update target_dim in
+# migrations.py *and* this line in the same commit.
 ENV SENTENCE_TRANSFORMERS_HOME=/app/.cache \
     HF_HOME=/app/.cache/huggingface \
     TORCH_HOME=/app/.cache/torch
 RUN mkdir -p /app/.cache/huggingface /app/.cache/torch && \
-    python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+    python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-m3')"
 
 # ============================================================================
 # Stage 2: Production
@@ -74,7 +81,9 @@ USER bugspotter
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+# start-period covers the lazy-load of BGE-M3 from the baked cache
+# (~5-15s cold) plus any first-request overhead.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://127.0.0.1:8000/health || exit 1
 
 CMD ["uvicorn", "bugspotter_intelligence.main:app", "--host", "0.0.0.0", "--port", "8000"]
