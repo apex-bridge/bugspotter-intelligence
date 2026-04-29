@@ -64,17 +64,21 @@ WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy pre-downloaded model cache from builder
+# Copy pre-downloaded model cache from builder, owned by the runtime
+# user up front (avoids a second 2.3 GB layer that a separate `chown
+# -R` would otherwise produce). TRANSFORMERS_OFFLINE=1 forbids
+# huggingface_hub from making any network calls — the model is on
+# disk, we never want to silently re-download or hit Hub rate limits
+# at runtime.
 ENV SENTENCE_TRANSFORMERS_HOME=/app/.cache \
     HF_HOME=/app/.cache/huggingface \
-    TORCH_HOME=/app/.cache/torch
-COPY --from=builder /app/.cache /app/.cache
+    TORCH_HOME=/app/.cache/torch \
+    TRANSFORMERS_OFFLINE=1 \
+    HF_HUB_OFFLINE=1
+COPY --from=builder --chown=bugspotter:bugspotter /app/.cache /app/.cache
 
 # Copy LICENSE (MIT compliance requires inclusion in distributed software)
 COPY LICENSE ./
-
-# Set ownership of cache directory for non-root user
-RUN chown -R bugspotter:bugspotter /app/.cache
 
 # Switch to non-root user
 USER bugspotter
