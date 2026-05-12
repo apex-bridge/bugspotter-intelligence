@@ -6,6 +6,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from bugspotter_intelligence.api.routes import admin, ask, bugs, search
 from bugspotter_intelligence.config import Settings
@@ -88,6 +89,13 @@ def create_app() -> FastAPI:
 
     # Add rate limiting middleware
     app.add_middleware(RateLimitMiddleware, settings=settings)
+
+    # Prometheus metrics — /metrics is exposed unauthenticated, same posture
+    # as /health (internal-only via docker network, no host-mapped port).
+    # Cardinality protection: Instrumentator's `should_group_untemplated`
+    # defaults to True, bucketing unmatched paths so 404 probes don't
+    # create per-path series.
+    Instrumentator().instrument(app).expose(app, include_in_schema=False)
 
     register_routes(app)
 

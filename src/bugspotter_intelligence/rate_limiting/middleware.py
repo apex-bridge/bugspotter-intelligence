@@ -34,8 +34,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Process request (rate limiting enforced by dependency)
         response = await call_next(request)
 
-        # Skip header addition for health check
-        if request.url.path == "/health":
+        # Skip header addition for health check and Prometheus scrape endpoint
+        if request.url.path in ("/health", "/metrics"):
             return response
 
         # Skip if rate limiting is disabled
