@@ -93,7 +93,13 @@ def create_app() -> FastAPI:
     # Prometheus metrics — must instrument BEFORE routes are added so the
     # ASGI middleware sees every request. /metrics is exposed unauthenticated
     # (internal-only via docker network, same posture as /health).
-    Instrumentator().instrument(app).expose(app, include_in_schema=False)
+    # should_handle_untemplated_res_paths normalises unmatched paths to
+    # prevent cardinality explosion from 404 probes.
+    Instrumentator().instrument(app).expose(
+        app,
+        include_in_schema=False,
+        should_handle_untemplated_res_paths=True,
+    )
 
     register_routes(app)
 
