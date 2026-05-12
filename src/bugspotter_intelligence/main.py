@@ -90,12 +90,11 @@ def create_app() -> FastAPI:
     # Add rate limiting middleware
     app.add_middleware(RateLimitMiddleware, settings=settings)
 
-    # Prometheus metrics — must instrument BEFORE routes are added so the
-    # ASGI middleware sees every request. /metrics is exposed unauthenticated
-    # (internal-only via docker network, same posture as /health).
+    # Prometheus metrics — /metrics is exposed unauthenticated, same posture
+    # as /health (internal-only via docker network, no host-mapped port).
     # Cardinality protection: Instrumentator's `should_group_untemplated`
-    # is True by default, which already buckets unmatched paths so 404
-    # probes don't create per-path series.
+    # defaults to True, bucketing unmatched paths so 404 probes don't
+    # create per-path series.
     Instrumentator().instrument(app).expose(app, include_in_schema=False)
 
     register_routes(app)
