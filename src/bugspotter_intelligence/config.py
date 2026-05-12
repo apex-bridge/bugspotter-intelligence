@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     # === LLM Providers ===
     llm_provider: str = "ollama"
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "llama3.1:8b"
+    ollama_model: str = "llama3.2:3b"
     ollama_timeout: float = 120.0
     anthropic_api_key: str | None = None
     claude_model: str = "claude-sonnet-4-20250514"

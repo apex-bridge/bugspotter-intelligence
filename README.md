@@ -194,7 +194,7 @@ RATE_LIMIT_DEFAULT_RPM=60
 # LLM Provider (ollama, claude, openai)
 LLM_PROVIDER=ollama
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.1:8b
+OLLAMA_MODEL=llama3.2:3b
 
 # Similarity Thresholds
 SIMILARITY_THRESHOLD=0.75
@@ -243,7 +243,7 @@ uvicorn bugspotter_intelligence.main:app --reload
 ## Docker Services
 
 - **PostgreSQL 16** with pgvector extension (vector similarity)
-- **Ollama** with llama3.1:8b model (local LLM, auto-downloaded)
+- **Ollama** with llama3.2:3b model (local LLM, auto-downloaded; recommended for CPU-only hosts)
 - **Redis 7** for rate limiting and query caching
 
 ## Development Roadmap
