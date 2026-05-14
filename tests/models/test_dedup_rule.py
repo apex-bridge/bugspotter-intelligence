@@ -11,7 +11,10 @@ from pydantic import ValidationError
 
 from bugspotter_intelligence.models.dedup_rule import (
     ActionSlack,
+    ActionWebhook,
     DedupRule,
+    RateLimit,
+    TriggerClusterGrowing,
 )
 
 
@@ -88,3 +91,47 @@ class TestDedupRuleDiscriminator:
         )
         assert len(from_wire.if_) == 1
         assert from_wire.if_[0].field == "severity"
+
+
+class TestWindowPattern:
+    """The `window` fields (trigger / condition / rate_limit) accept only
+    `<digits><unit>` strings — the executor parses these into seconds, and
+    accepting "an hour" or "1 hr" would just be a delayed failure.
+    """
+
+    @pytest.mark.parametrize("good", ["1s", "30s", "1h", "24h", "7d", "1w", "100h"])
+    def test_trigger_window_accepts_well_formed(self, good: str):
+        TriggerClusterGrowing(threshold=5, window=good)
+
+    @pytest.mark.parametrize("bad", ["", "1", "1 h", "1hr", "one hour", "1m30s", "h1"])
+    def test_trigger_window_rejects_malformed(self, bad: str):
+        with pytest.raises(ValidationError):
+            TriggerClusterGrowing(threshold=5, window=bad)
+
+    def test_rate_limit_window_pattern(self):
+        RateLimit(count=1, window="1h")  # ok
+        with pytest.raises(ValidationError):
+            RateLimit(count=1, window="every hour")
+
+
+class TestActionWebhookUrl:
+    """Pydantic's HttpUrl rejects malformed URLs at schema-time so the LLM
+    can't smuggle in a notify.webhook with a bad target that only fails
+    at executor time.
+    """
+
+    def test_accepts_valid_https_url(self):
+        ActionWebhook(url="https://example.com/hook")
+
+    def test_accepts_valid_http_url(self):
+        ActionWebhook(url="http://localhost:8080/hook")
+
+    def test_rejects_non_url_string(self):
+        with pytest.raises(ValidationError):
+            ActionWebhook(url="not-a-url")
+
+    def test_rejects_javascript_scheme(self):
+        # HttpUrl restricts scheme to http/https — the LLM shouldn't be
+        # able to emit a javascript: target even by mistake.
+        with pytest.raises(ValidationError):
+            ActionWebhook(url="javascript:alert(1)")

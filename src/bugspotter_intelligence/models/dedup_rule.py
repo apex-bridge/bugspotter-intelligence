@@ -22,7 +22,13 @@ Design notes:
 
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, HttpUrl, model_validator
+
+# Duration string pattern used by `window` / `rate_limit.window` fields.
+# Accepts forms like "30s", "1h", "24h", "7d", "1w" — the rule executor
+# parses these into seconds. Restricting at the schema level prevents the
+# LLM from emitting wild values like "an hour" or "1 hr".
+_WINDOW_PATTERN = r"^\d+[smhdw]$"
 
 # ============================================================================
 # Triggers — pick exactly one
@@ -53,7 +59,9 @@ class TriggerClusterGrowing(BaseModel):
         ..., ge=2, description="Minimum new hits to fire (e.g. 5)"
     )
     window: str = Field(
-        ..., description='Window over which `threshold` applies, e.g. "1h", "24h"'
+        ...,
+        pattern=_WINDOW_PATTERN,
+        description='Window over which `threshold` applies, e.g. "1h", "24h"',
     )
 
 
@@ -100,6 +108,7 @@ class ConditionSpec(BaseModel):
     value: Any = Field(..., description="Value to compare against")
     window: str | None = Field(
         None,
+        pattern=_WINDOW_PATTERN,
         description=(
             'Time window for windowed fields (`hits_in_window`). '
             'Examples: "1h", "24h", "7d". Ignored for non-windowed fields.'
@@ -196,7 +205,14 @@ class ActionWebhook(BaseModel):
     """POST a JSON payload to a custom webhook URL."""
 
     type: Literal["notify.webhook"] = "notify.webhook"
-    url: str = Field(..., description="HTTPS webhook URL")
+    url: HttpUrl = Field(
+        ...,
+        description=(
+            "Webhook URL. Pydantic's HttpUrl validator enforces scheme + host "
+            "shape so the LLM can't emit `notify.webhook` with a malformed "
+            "URL that only fails at executor time."
+        ),
+    )
     payload: dict[str, Any] | None = Field(
         None, description="Optional JSON body. Template vars supported in string values."
     )
@@ -228,7 +244,7 @@ class RateLimit(BaseModel):
     """
 
     count: int = Field(..., ge=1, description="Max fires per window")
-    window: str = Field(..., description='Window, e.g. "1h", "24h"')
+    window: str = Field(..., pattern=_WINDOW_PATTERN, description='Window, e.g. "1h", "24h"')
 
 
 class DedupRule(BaseModel):

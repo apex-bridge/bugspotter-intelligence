@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 
 from pydantic import ValidationError
 
@@ -258,12 +257,19 @@ def _extract_json_object(raw: str) -> dict | None:
     """Pull the first plausible JSON object out of an LLM response.
 
     Strategy:
-      1. Try parsing the whole string.
-      2. Try the contents of any ```json``` (or generic ```) fence.
-      3. Fall back to brace-balanced extraction at arbitrary depth and
-         take the LAST plausible object — LLMs sometimes echo the schema
-         template before answering, and the actual answer is the trailing
-         block. Returns None when no valid JSON object can be extracted.
+      1. Try parsing the whole string — covers the common case where
+         the LLM honored the "no prose, no fences" instruction.
+      2. Fall back to brace-balanced extraction at arbitrary depth, taking
+         the LAST plausible object — LLMs sometimes echo the schema
+         template before answering, and the brace counter ignores
+         non-`{}` characters (so ```json`` fences, prose, etc. all pass
+         through harmlessly).
+
+    A previous version had a separate markdown-fence regex step in
+    between; it was removed because the regex was non-greedy on `{...}`
+    and silently truncated nested JSON (the DedupRule envelope is 4
+    levels deep). The brace counter handles both fenced and unfenced
+    output correctly.
     """
     raw = raw.strip()
     if not raw:
@@ -277,21 +283,9 @@ def _extract_json_object(raw: str) -> dict | None:
     except json.JSONDecodeError:
         pass
 
-    # 2. ```json … ``` fences (or generic ``` … ```). Non-greedy on
-    # purpose so we extract the *first* fenced block, which is the
-    # convention when models emit a fenced answer.
-    fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
-    if fence_match:
-        try:
-            parsed = json.loads(fence_match.group(1))
-            if isinstance(parsed, dict):
-                return parsed
-        except json.JSONDecodeError:
-            pass
-
-    # 3. brace-balanced sweep — supports arbitrary depth (the rule
-    # schema is nested 3-4 levels deep, which a depth-bounded regex
-    # would silently truncate).
+    # 2. brace-balanced sweep — supports arbitrary depth (the rule
+    # schema is nested 3-4 levels deep). Take the LAST candidate so
+    # schema-echo-then-answer responses return the answer.
     for block in reversed(_extract_top_level_json_objects(raw)):
         try:
             parsed = json.loads(block)
