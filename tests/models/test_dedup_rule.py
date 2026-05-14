@@ -10,11 +10,14 @@ import pytest
 from pydantic import ValidationError
 
 from bugspotter_intelligence.models.dedup_rule import (
+    ActionEmail,
     ActionSlack,
     ActionWebhook,
+    ConditionSpec,
     DedupRule,
     RateLimit,
     TriggerClusterGrowing,
+    TriggerSchedule,
 )
 
 
@@ -112,6 +115,87 @@ class TestWindowPattern:
         RateLimit(count=1, window="1h")  # ok
         with pytest.raises(ValidationError):
             RateLimit(count=1, window="every hour")
+
+
+class TestTriggerScheduleCron:
+    """Cron pattern catches obvious prose / typos. Semantic validity is
+    delegated to the executor — the schema's job is to stop "every monday"
+    from sneaking through the parse loop."""
+
+    @pytest.mark.parametrize(
+        "good", ["0 9 * * 1", "*/5 * * * *", "0 0 1 1 *", "30 9 * * 1-5"]
+    )
+    def test_accepts_well_formed_cron(self, good: str):
+        TriggerSchedule(cron=good)
+
+    @pytest.mark.parametrize(
+        "bad", ["every monday", "0 9 * *", "0 9 * * 1 0", "", "monday at 9"]
+    )
+    def test_rejects_malformed_cron(self, bad: str):
+        with pytest.raises(ValidationError):
+            TriggerSchedule(cron=bad)
+
+
+class TestConditionSpec:
+    def test_accepts_known_field(self):
+        ConditionSpec(field="canonical.status", op="in", value=["closed"])
+
+    def test_rejects_unknown_field(self):
+        # LLMs hallucinate field names that look plausible but aren't
+        # supported by the executor — schema-level closure catches them.
+        with pytest.raises(ValidationError):
+            ConditionSpec(field="canonical.priority", op="eq", value="high")
+
+    def test_in_op_requires_list(self):
+        with pytest.raises(ValidationError, match="requires a list value"):
+            ConditionSpec(field="canonical.status", op="in", value="closed")
+
+    def test_not_in_op_requires_list(self):
+        with pytest.raises(ValidationError, match="requires a list value"):
+            ConditionSpec(field="severity", op="not_in", value="low")
+
+    def test_gte_op_requires_number(self):
+        with pytest.raises(ValidationError, match="requires a numeric value"):
+            ConditionSpec(
+                field="hits_in_window", op="gte", value="three", window="24h"
+            )
+
+    def test_eq_op_accepts_scalar(self):
+        # No mismatch on `eq` — it's the catch-all op for single values.
+        ConditionSpec(field="reporter.customer.tier", op="eq", value="enterprise")
+
+
+class TestActionEmailTo:
+    """Recipient validation accepts the three special tokens or an
+    email-shaped string. Strict RFC-5322 is the executor's job."""
+
+    @pytest.mark.parametrize(
+        "good",
+        [
+            "reporter",
+            "closer",
+            "all_reporters",
+            "team@example.com",
+            "alice+ops@sub.example.co.uk",
+        ],
+    )
+    def test_accepts_valid_targets(self, good: str):
+        ActionEmail(to=good, template="dedup_ack")
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "Reporter",  # case-sensitive special tokens — match the executor's exact set
+            "everyone",
+            "not-an-email",
+            "@example.com",
+            "alice@",
+            "alice@nodot",
+        ],
+    )
+    def test_rejects_invalid_targets(self, bad: str):
+        with pytest.raises(ValidationError):
+            ActionEmail(to=bad, template="dedup_ack")
 
 
 class TestActionWebhookUrl:

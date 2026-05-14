@@ -30,6 +30,20 @@ from pydantic import BaseModel, Field, HttpUrl, model_validator
 # LLM from emitting wild values like "an hour" or "1 hr".
 _WINDOW_PATTERN = r"^\d+[smhdw]$"
 
+# Standard 5-field cron (`min hour day month dow`). Deliberately loose —
+# this catches typos / prose like "every monday" but doesn't validate
+# semantics (e.g. "60 * * * *" passes regex but is bogus). The executor
+# does the strict parse; this pattern's job is to stop obvious nonsense
+# at the schema boundary so the LLM gets feedback during the parse loop
+# rather than at execution time.
+_CRON_PATTERN = r"^(\S+\s+){4}\S+$"
+
+# Recipients accepted by ActionEmail.to: three special tokens resolved
+# at execution time, or a literal email address. The email regex is
+# intentionally loose ("anything @ anything . anything") — exact RFC-5322
+# validation belongs in the executor where DNS / MX checks live.
+_EMAIL_TARGET_PATTERN = r"^(reporter|closer|all_reporters|[^@\s]+@[^@\s]+\.[^@\s]+)$"
+
 # ============================================================================
 # Triggers — pick exactly one
 # ============================================================================
@@ -70,7 +84,9 @@ class TriggerSchedule(BaseModel):
 
     type: Literal["schedule"] = "schedule"
     cron: str = Field(
-        ..., description='Standard 5-field cron, e.g. "0 9 * * 1" (Mondays 09:00)'
+        ...,
+        pattern=_CRON_PATTERN,
+        description='Standard 5-field cron, e.g. "0 9 * * 1" (Mondays 09:00)',
     )
 
 
@@ -93,15 +109,22 @@ TriggerSpec = Annotated[
 class ConditionSpec(BaseModel):
     """One AND-clause.
 
-    Fields supported by the executor (validated at execute time, not here):
-      canonical.status            in/eq/not_in   list[CanonicalStatus] or single
-      canonical.closed_days_ago   gte/lte        int
-      hits_in_window              gte            int  (requires `window`)
-      reporter.customer.tier      eq/in          str  ("enterprise", "free", ...)
-      severity                    in/eq          list[str] or single
+    `field` is a closed Literal so the LLM can't invent unsupported paths
+    (e.g. `canonical.priority`) and have them quietly accepted; the
+    executor expects exactly these field names and any other would be
+    a silent no-op. Type compatibility (op + value shape) is partly
+    enforced by `_validate_op_value` below; the rest (e.g. severity
+    values must be one of {low, medium, high, critical}) is delegated
+    to the executor where the canonical enums live.
     """
 
-    field: str = Field(..., description="Dot-path of the property being tested")
+    field: Literal[
+        "canonical.status",
+        "canonical.closed_days_ago",
+        "hits_in_window",
+        "reporter.customer.tier",
+        "severity",
+    ] = Field(..., description="Dot-path of the property being tested")
     op: Literal["eq", "in", "not_in", "gte", "lte"] = Field(
         ..., description="Comparison operator"
     )
@@ -114,6 +137,31 @@ class ConditionSpec(BaseModel):
             'Examples: "1h", "24h", "7d". Ignored for non-windowed fields.'
         ),
     )
+
+    @model_validator(mode="after")
+    def _validate_op_value(self) -> "ConditionSpec":
+        """Reject obvious op/value mismatches at parse time.
+
+        Two pairings the LLM gets wrong most often:
+          - `in` / `not_in` with a scalar value (should be a list)
+          - `gte` / `lte` with a non-number value
+
+        We don't try to typecheck the value against the field's expected
+        type here — that needs the canonical-enum knowledge held by the
+        executor. The point of this validator is to catch the obvious
+        shape mistakes before they reach the executor.
+        """
+        if self.op in ("in", "not_in") and not isinstance(self.value, list):
+            raise ValueError(
+                f"op '{self.op}' on field '{self.field}' requires a list value, "
+                f"got {type(self.value).__name__}"
+            )
+        if self.op in ("gte", "lte") and not isinstance(self.value, (int, float)):
+            raise ValueError(
+                f"op '{self.op}' on field '{self.field}' requires a numeric value, "
+                f"got {type(self.value).__name__}"
+            )
+        return self
 
 
 # ============================================================================
@@ -152,6 +200,7 @@ class ActionEmail(BaseModel):
     type: Literal["notify.email"] = "notify.email"
     to: str = Field(
         ...,
+        pattern=_EMAIL_TARGET_PATTERN,
         description=(
             'Recipient. Special values: "reporter" (the user who submitted), '
             '"closer" (last person to close the canonical), "all_reporters" '
