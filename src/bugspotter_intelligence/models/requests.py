@@ -192,3 +192,39 @@ class SearchRequest(BaseModel):
         if self.date_from and self.date_to and self.date_from > self.date_to:
             raise ValueError("date_from must be less than or equal to date_to")
         return self
+
+
+class ParseNLRuleRequest(BaseModel):
+    """Request model for POST /rules/parse-nl.
+
+    Takes a natural-language description of a desired dedup rule and asks the
+    LLM to convert it into a structured DedupRule. The optional `context`
+    supplies the available integrations/channels/templates so the LLM doesn't
+    invent action targets that don't exist for the calling tenant.
+    """
+
+    nl: str = Field(
+        ...,
+        min_length=5,
+        max_length=2000,
+        description="Plain-language description of the desired rule",
+        examples=[
+            "when a closed bug gets three hits in a day, reopen it and ping the closer in slack",
+        ],
+    )
+
+    available_integrations: list[str] = Field(
+        default_factory=list,
+        description='Ticket-system integrations enabled for this tenant (e.g. ["jira", "linear"])',
+        examples=[["jira"]],
+    )
+
+    available_slack_channels: list[str] = Field(
+        default_factory=list,
+        description='Slack channels the tenant has configured (e.g. ["#regressions", "#vip"])',
+    )
+
+    available_email_templates: list[str] = Field(
+        default_factory=list,
+        description="Notification email template IDs available to the tenant",
+    )
