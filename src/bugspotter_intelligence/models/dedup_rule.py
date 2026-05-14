@@ -22,7 +22,7 @@ Design notes:
 
 from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # ============================================================================
 # Triggers — pick exactly one
@@ -173,6 +173,23 @@ class ActionSlack(BaseModel):
     message: str = Field(
         ..., description="Message body. Same template vars as ActionAddComment."
     )
+
+    @model_validator(mode="after")
+    def _exactly_one_target(self) -> "ActionSlack":
+        """Enforce: exactly one of `channel` / `user` is set.
+
+        Without this, the LLM can emit a Slack action with both fields (or
+        neither) and validation passes — only the executor would catch the
+        misconfiguration at runtime, and only if it bothered to. Better to
+        surface it as a parse-time schema error.
+        """
+        has_channel = self.channel is not None and self.channel.strip() != ""
+        has_user = self.user is not None and self.user.strip() != ""
+        if has_channel == has_user:
+            raise ValueError(
+                "ActionSlack requires exactly one of `channel` or `user` to be set"
+            )
+        return self
 
 
 class ActionWebhook(BaseModel):

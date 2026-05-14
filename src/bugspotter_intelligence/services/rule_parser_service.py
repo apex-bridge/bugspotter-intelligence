@@ -210,12 +210,60 @@ def build_prompt(
 # ============================================================================
 
 
+def _extract_top_level_json_objects(text: str) -> list[str]:
+    """Return every top-level `{...}` substring in `text`, in order.
+
+    Uses a brace counter — handles arbitrary nesting depth, unlike a regex
+    with hardcoded recursion bounds. Strings and their escape sequences are
+    tracked so braces inside `"..."` don't throw off the depth.
+
+    "Top-level" here means: not nested inside another `{...}` at the
+    outermost scope. So a response like `{"a": {"b": 1}}` returns one
+    candidate, not two.
+    """
+    candidates: list[str] = []
+    depth = 0
+    start = -1
+    in_string = False
+    escape_next = False
+
+    for i, ch in enumerate(text):
+        if escape_next:
+            escape_next = False
+            continue
+        if in_string:
+            if ch == "\\":
+                escape_next = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and start >= 0:
+                    candidates.append(text[start : i + 1])
+                    start = -1
+
+    return candidates
+
+
 def _extract_json_object(raw: str) -> dict | None:
     """Pull the first plausible JSON object out of an LLM response.
 
-    Strategy: try the whole string first, then walk through any markdown
-    fences, then fall back to a brace-balanced regex. Returns None when no
-    valid JSON object can be extracted.
+    Strategy:
+      1. Try parsing the whole string.
+      2. Try the contents of any ```json``` (or generic ```) fence.
+      3. Fall back to brace-balanced extraction at arbitrary depth and
+         take the LAST plausible object — LLMs sometimes echo the schema
+         template before answering, and the actual answer is the trailing
+         block. Returns None when no valid JSON object can be extracted.
     """
     raw = raw.strip()
     if not raw:
@@ -229,7 +277,9 @@ def _extract_json_object(raw: str) -> dict | None:
     except json.JSONDecodeError:
         pass
 
-    # 2. ```json … ``` fences (or generic ``` … ```)
+    # 2. ```json … ``` fences (or generic ``` … ```). Non-greedy on
+    # purpose so we extract the *first* fenced block, which is the
+    # convention when models emit a fenced answer.
     fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
     if fence_match:
         try:
@@ -239,10 +289,10 @@ def _extract_json_object(raw: str) -> dict | None:
         except json.JSONDecodeError:
             pass
 
-    # 3. greedy brace match — take the LAST {...} block (LLM may echo
-    # the schema before answering)
-    json_blocks = re.findall(r"\{(?:[^{}]|(?:\{[^{}]*\}))*\}", raw, re.DOTALL)
-    for block in reversed(json_blocks):
+    # 3. brace-balanced sweep — supports arbitrary depth (the rule
+    # schema is nested 3-4 levels deep, which a depth-bounded regex
+    # would silently truncate).
+    for block in reversed(_extract_top_level_json_objects(raw)):
         try:
             parsed = json.loads(block)
             if isinstance(parsed, dict):

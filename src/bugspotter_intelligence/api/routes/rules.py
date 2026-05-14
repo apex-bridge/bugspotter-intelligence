@@ -44,7 +44,11 @@ async def parse_nl_rule(
         available_email_templates=body.available_email_templates,
     )
 
-    model = getattr(settings, f"{settings.llm_provider}_model", settings.llm_provider)
+    # `settings.{provider}_model` is the model identifier (e.g.
+    # "llama3.2:3b"); falling back to the provider name ("ollama") would
+    # silently put the wrong value into the response. Use a sentinel
+    # instead so consumers can detect the misconfiguration.
+    model = getattr(settings, f"{settings.llm_provider}_model", "unknown")
     return ParseNLRuleResponse(
         draft=result.draft,
         errors=result.errors,

@@ -96,6 +96,34 @@ class TestExtractJsonObject:
         assert _extract_json_object("") is None
         assert _extract_json_object("   \n\t  ") is None
 
+    def test_handles_deeply_nested_objects(self):
+        # The real DedupRule envelope is 4+ levels deep
+        # (draft → when → ... or draft → if → [ConditionSpec] → value-list).
+        # The previous regex-based extractor only handled 2 levels.
+        deep = '{"draft": {"when": {"type": "schedule", "cron": "* * * * *"}, "then": [{"type": "notify.email", "to": "x@y.z", "template": "t"}]}, "errors": [], "clarifications": []}'
+        parsed = _extract_json_object(deep)
+        assert parsed is not None
+        assert parsed["draft"]["when"]["type"] == "schedule"
+
+    def test_handles_braces_inside_strings(self):
+        # An LLM may emit a description containing literal `{` / `}`.
+        # The extractor's brace counter must ignore them inside strings.
+        body = '{"draft": null, "errors": ["use `{name}` to interpolate"], "clarifications": []}'
+        parsed = _extract_json_object(body)
+        assert parsed is not None
+        assert parsed["errors"] == ["use `{name}` to interpolate"]
+
+    def test_picks_last_object_when_schema_echoed(self):
+        # The LLM sometimes prints the schema before the answer. We want
+        # the answer (the last top-level object).
+        echoed = (
+            'Here is the schema: {"draft": {"name": "..."}, "errors": []}\n'
+            'And the answer: {"draft": {"name": "Real"}, "errors": [], "clarifications": []}'
+        )
+        parsed = _extract_json_object(echoed)
+        assert parsed is not None
+        assert parsed["draft"]["name"] == "Real"
+
 
 # ============================================================================
 # RuleParserService.parse_nl_to_rule
