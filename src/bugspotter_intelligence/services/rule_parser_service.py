@@ -351,11 +351,24 @@ class RuleParserService:
         )
 
         # Low temperature: we want schema adherence, not creativity.
-        raw = await self.llm.generate(
-            prompt=prompt,
-            temperature=0.1,
-            max_tokens=800,
-        )
+        # Wrap the LLM call so a provider outage / timeout produces a
+        # structured parser error rather than bubbling a 500 up to the
+        # admin UI. The exception details are logged but not surfaced —
+        # they can include backend URLs / auth headers in some clients.
+        try:
+            raw = await self.llm.generate(
+                prompt=prompt,
+                temperature=0.1,
+                max_tokens=800,
+            )
+        except Exception:
+            logger.exception("LLM generate failed during rule parse")
+            return RuleParserResult(
+                draft=None,
+                errors=["Failed to generate a rule draft. Please retry."],
+                clarifications=[],
+                raw_llm_output="",
+            )
 
         envelope = _extract_json_object(raw)
         if envelope is None:
@@ -366,18 +379,17 @@ class RuleParserService:
                 raw_llm_output=raw,
             )
 
-        errors_from_llm = envelope.get("errors") or []
-        clarifications_from_llm = envelope.get("clarifications") or []
+        errors_from_llm = _to_str_list(envelope.get("errors"))
+        clarifications_from_llm = _to_str_list(envelope.get("clarifications"))
         draft_data = envelope.get("draft")
 
         # `null` draft is a legitimate signal — surface the LLM's reasoning
         if draft_data is None:
             return RuleParserResult(
                 draft=None,
-                errors=[str(e) for e in errors_from_llm][:10] or [
-                    "LLM declined to produce a rule but gave no explanation."
-                ],
-                clarifications=[str(c) for c in clarifications_from_llm][:10],
+                errors=errors_from_llm
+                or ["LLM declined to produce a rule but gave no explanation."],
+                clarifications=clarifications_from_llm,
                 raw_llm_output=raw,
             )
 
@@ -385,23 +397,46 @@ class RuleParserService:
         try:
             draft = DedupRule.model_validate(draft_data)
         except ValidationError as ve:
+            # Validation errors are structured — log those. Do NOT log the
+            # raw LLM response: it echoes whatever the admin typed plus the
+            # LLM's interpretation, which is unnecessary for diagnosing a
+            # schema mismatch and risks pulling sensitive text into the
+            # server log stream. The raw output is still returned in the
+            # response for client-side debugging.
             logger.info(
                 "LLM produced a draft that failed schema validation",
-                extra={"errors": ve.errors(), "raw": raw[:500]},
+                extra={"errors": ve.errors()},
             )
             return RuleParserResult(
                 draft=None,
                 errors=_friendly_validation_errors(ve),
-                clarifications=[str(c) for c in clarifications_from_llm][:10],
+                clarifications=clarifications_from_llm,
                 raw_llm_output=raw,
             )
 
         return RuleParserResult(
             draft=draft,
-            errors=[str(e) for e in errors_from_llm][:10],
-            clarifications=[str(c) for c in clarifications_from_llm][:10],
+            errors=errors_from_llm,
+            clarifications=clarifications_from_llm,
             raw_llm_output=raw,
         )
+
+
+def _to_str_list(value: object, limit: int = 10) -> list[str]:
+    """Normalize a JSON-envelope field into a bounded list[str].
+
+    The LLM is *asked* to return arrays for `errors` and `clarifications`,
+    but it sometimes returns a string ("the rule is too vague") or null.
+    Without normalization, the previous code did `[str(x) for x in value]`
+    which iterates a string character-by-character — producing nonsense
+    output to the client. This helper accepts a list, a scalar, or null,
+    and always returns a clean list bounded by `limit`.
+    """
+    if isinstance(value, list):
+        return [str(v) for v in value][:limit]
+    if value is None:
+        return []
+    return [str(value)][:limit]
 
 
 def _friendly_validation_errors(ve: ValidationError) -> list[str]:

@@ -20,6 +20,7 @@ from bugspotter_intelligence.models.dedup_rule import DedupRule
 from bugspotter_intelligence.services.rule_parser_service import (
     RuleParserService,
     _extract_json_object,
+    _to_str_list,
     build_prompt,
 )
 
@@ -96,6 +97,26 @@ class TestExtractJsonObject:
         assert _extract_json_object("") is None
         assert _extract_json_object("   \n\t  ") is None
 
+
+class TestToStrList:
+    def test_passes_through_list_of_strings(self):
+        assert _to_str_list(["a", "b"]) == ["a", "b"]
+
+    def test_coerces_list_items_to_str(self):
+        assert _to_str_list([1, {"x": 2}]) == ["1", "{'x': 2}"]
+
+    def test_caps_list_length(self):
+        assert _to_str_list(list(range(20)), limit=5) == ["0", "1", "2", "3", "4"]
+
+    def test_wraps_a_scalar_in_a_list(self):
+        # Small models sometimes return a string instead of a list.
+        assert _to_str_list("oops") == ["oops"]
+
+    def test_treats_none_as_empty_list(self):
+        assert _to_str_list(None) == []
+
+
+class TestExtractJsonObjectDeep:
     def test_handles_deeply_nested_objects(self):
         # The real DedupRule envelope is 4+ levels deep
         # (draft → when → ... or draft → if → [ConditionSpec] → value-list).
@@ -278,6 +299,42 @@ class TestRuleParserService:
 
         assert result.draft is None
         assert any("then" in e for e in result.errors)
+
+    @pytest.mark.asyncio
+    async def test_llm_provider_failure_returns_structured_error(self):
+        # An LLM outage / timeout used to bubble up to the admin UI as a
+        # 500. Now it returns a structured RuleParserResult so the client
+        # can surface a retry message gracefully.
+        llm = MagicMock(spec=LLMProvider)
+        llm.generate = AsyncMock(side_effect=RuntimeError("connection refused"))
+        service = RuleParserService(llm)
+
+        result = await service.parse_nl_to_rule(nl="dummy")
+
+        assert result.draft is None
+        assert len(result.errors) == 1
+        assert "retry" in result.errors[0].lower()
+        # raw_llm_output stays empty — we never got anything back
+        assert result.raw_llm_output == ""
+
+    @pytest.mark.asyncio
+    async def test_llm_returns_errors_as_string_not_list(self):
+        # The schema asks for `errors: list[str]`, but small models
+        # sometimes return a scalar. Without normalization the old code
+        # iterated the string character-by-character — comic bug.
+        envelope = """{
+          "draft": null,
+          "errors": "Input is too abstract.",
+          "clarifications": "Which trigger?"
+        }"""
+        llm = _make_llm(envelope)
+        service = RuleParserService(llm)
+
+        result = await service.parse_nl_to_rule(nl="dummy")
+
+        assert result.draft is None
+        assert result.errors == ["Input is too abstract."]
+        assert result.clarifications == ["Which trigger?"]
 
     @pytest.mark.asyncio
     async def test_tenant_context_is_passed_to_prompt(self):
