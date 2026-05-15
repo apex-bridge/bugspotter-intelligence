@@ -12,6 +12,7 @@ from bugspotter_intelligence.services import BugCommandService, BugQueryService,
 from bugspotter_intelligence.services.embeddings import EmbeddingProvider
 from bugspotter_intelligence.services.embeddings.factory import create_embedding_provider
 from bugspotter_intelligence.services.reranker import LLMReranker
+from bugspotter_intelligence.services.rule_parser_service import RuleParserService
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,18 @@ def get_search_service(
     )
 
 
+def get_rule_parser_service(
+    llm_provider: LLMProvider = Depends(get_llm_provider),
+) -> RuleParserService:
+    """Get RuleParserService instance.
+
+    Lets the rules route be unit-tested by overriding this dependency
+    (FastAPI's `app.dependency_overrides`) without having to swap out
+    the underlying LLM provider.
+    """
+    return RuleParserService(llm_provider)
+
+
 __all__ = [
     "get_settings",
     "get_llm_provider",
@@ -106,5 +119,6 @@ __all__ = [
     "get_bug_command_service",
     "get_bug_query_service",
     "get_search_service",
+    "get_rule_parser_service",
     "get_db_connection",
 ]

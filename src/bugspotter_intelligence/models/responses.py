@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+from .dedup_rule import DedupRule
+
 
 class AskResponse(BaseModel):
     """Response model for /ask endpoint"""
@@ -162,6 +164,33 @@ class SearchResponse(BaseModel):
     mode: Literal["fast", "smart"]
     query: str
     cached: bool = False
+
+
+class ParseNLRuleResponse(BaseModel):
+    """Response from POST /rules/parse-nl.
+
+    `draft` is null when the LLM couldn't produce a confident rule — in that
+    case `errors` and/or `clarifications` explain why. `clarifications` are
+    follow-up questions the user can answer to refine the rule (e.g. "which
+    Slack channel?"). `raw_llm_output` is included for debugging/observability
+    so the admin UI can show what the LLM actually returned.
+    """
+
+    draft: Optional["DedupRule"] = Field(
+        None, description="Structured rule the LLM extracted, or null on failure"
+    )
+    errors: list[str] = Field(
+        default_factory=list,
+        description="Reasons the input could not be parsed (empty if draft is set)",
+    )
+    clarifications: list[str] = Field(
+        default_factory=list,
+        description="Follow-up questions the user can answer to disambiguate",
+    )
+    raw_llm_output: str | None = Field(
+        None, description="Raw LLM text — exposed for debugging, not for UI"
+    )
+    model: str = Field(..., description="LLM model that produced the parse")
 
 
 class CacheStatsResponse(BaseModel):
