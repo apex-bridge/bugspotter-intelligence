@@ -140,27 +140,59 @@ class ConditionSpec(BaseModel):
 
     @model_validator(mode="after")
     def _validate_op_value(self) -> "ConditionSpec":
-        """Reject obvious op/value mismatches at parse time.
+        """Reject obvious op/value mismatches at parse time, with light
+        coercion for the LLM-friendly cases.
 
-        Two pairings the LLM gets wrong most often:
-          - `in` / `not_in` with a scalar value (should be a list)
-          - `gte` / `lte` with a non-number value
+        The LLM gets these wrong most often:
+          - `in` / `not_in` paired with a scalar value (should be a list)
+          - `gte` / `lte` with a numeric-looking string (`"3"`)
+          - `hits_in_window` without an accompanying `window`
 
-        We don't try to typecheck the value against the field's expected
-        type here — that needs the canonical-enum knowledge held by the
-        executor. The point of this validator is to catch the obvious
-        shape mistakes before they reach the executor.
+        We coerce the scalar→list and string→number cases instead of
+        rejecting outright — small models routinely emit these shapes
+        for otherwise-correct rules, and forcing a re-parse loop adds
+        latency for no useful signal. Anything we can't fix is still
+        surfaced as a parse error with a hint about what the LLM should
+        have emitted.
+
+        Field-type validation (severity ∈ {low,medium,...}) stays in
+        the executor where the canonical enums live.
         """
-        if self.op in ("in", "not_in") and not isinstance(self.value, list):
+        # in / not_in must operate on lists. Wrap scalars instead of rejecting.
+        if self.op in ("in", "not_in"):
+            if not isinstance(self.value, list):
+                if isinstance(self.value, (str, int, float, bool)):
+                    self.value = [self.value]
+                else:
+                    raise ValueError(
+                        f"op '{self.op}' on field '{self.field}' requires a list value, "
+                        f"got {type(self.value).__name__}"
+                    )
+
+        # gte / lte must be numeric. Coerce string-numbers ("3" → 3.0).
+        if self.op in ("gte", "lte"):
+            if isinstance(self.value, str):
+                try:
+                    self.value = float(self.value)
+                except ValueError:
+                    pass
+            if not isinstance(self.value, (int, float)) or isinstance(self.value, bool):
+                # `bool` is a subclass of int in Python; reject it
+                # explicitly since `True > 5` evaluates and would silently
+                # pass downstream.
+                raise ValueError(
+                    f"op '{self.op}' on field '{self.field}' requires a numeric value, "
+                    f"got {type(self.value).__name__}"
+                )
+
+        # `hits_in_window` is meaningless without a window — the prompt
+        # says so and the executor enforces it. Surface here for early
+        # feedback rather than rejecting at execute time.
+        if self.field == "hits_in_window" and not self.window:
             raise ValueError(
-                f"op '{self.op}' on field '{self.field}' requires a list value, "
-                f"got {type(self.value).__name__}"
+                "field 'hits_in_window' requires a 'window' parameter, e.g. '24h'"
             )
-        if self.op in ("gte", "lte") and not isinstance(self.value, (int, float)):
-            raise ValueError(
-                f"op '{self.op}' on field '{self.field}' requires a numeric value, "
-                f"got {type(self.value).__name__}"
-            )
+
         return self
 
 

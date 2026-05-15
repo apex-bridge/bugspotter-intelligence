@@ -5,8 +5,11 @@ The flow is intentionally simple:
   1. Build a system prompt that defines the full ontology (triggers /
      conditions / actions) plus a handful of few-shot examples.
   2. Append the user's NL string and ask the LLM for strict JSON output.
-  3. Try `json.loads`, then a regex fallback to pull JSON out of any markdown
-     fences or pre/postamble the LLM may have wrapped around it.
+  3. Try `json.loads`, then a character-level brace counter
+     (`_extract_top_level_json_objects`) to pull JSON out of any markdown
+     fences or pre/postamble the LLM may have wrapped around it. The
+     counter handles arbitrary nesting depth (the DedupRule envelope is
+     4 levels deep) and skips braces inside JSON strings.
   4. Validate the JSON against the `DedupRule` Pydantic model. Validation
      errors → return a null draft with a human-readable `errors` list rather
      than throwing.

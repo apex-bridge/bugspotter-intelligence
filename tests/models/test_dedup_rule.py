@@ -82,6 +82,8 @@ class TestDedupRuleDiscriminator:
 
     def test_accepts_both_if_and_if_aliases(self):
         # Wire shape uses "if"; python attribute is "if_".
+        # `populate_by_name=True` means either form should construct the
+        # same object — test BOTH to lock that in.
         from_wire = DedupRule.model_validate(
             {
                 "name": "x",
@@ -94,6 +96,19 @@ class TestDedupRuleDiscriminator:
         )
         assert len(from_wire.if_) == 1
         assert from_wire.if_[0].field == "severity"
+
+        from_python = DedupRule.model_validate(
+            {
+                "name": "x",
+                "when": {"type": "duplicate_detected"},
+                "if_": [{"field": "severity", "op": "eq", "value": "high"}],
+                "then": [
+                    {"type": "notify.email", "to": "reporter", "template": "ack"}
+                ],
+            }
+        )
+        assert len(from_python.if_) == 1
+        assert from_python.if_[0].field == "severity"
 
 
 class TestWindowPattern:
@@ -146,13 +161,15 @@ class TestConditionSpec:
         with pytest.raises(ValidationError):
             ConditionSpec(field="canonical.priority", op="eq", value="high")
 
-    def test_in_op_requires_list(self):
+    def test_in_op_rejects_non_coercible_value(self):
+        # Scalars are coerced (covered by test_in_op_coerces_scalar_to_singleton_list);
+        # only non-scalar, non-list values like dicts should be rejected.
         with pytest.raises(ValidationError, match="requires a list value"):
-            ConditionSpec(field="canonical.status", op="in", value="closed")
+            ConditionSpec(field="canonical.status", op="in", value={"bad": True})
 
-    def test_not_in_op_requires_list(self):
+    def test_not_in_op_rejects_non_coercible_value(self):
         with pytest.raises(ValidationError, match="requires a list value"):
-            ConditionSpec(field="severity", op="not_in", value="low")
+            ConditionSpec(field="severity", op="not_in", value={"bad": True})
 
     def test_gte_op_requires_number(self):
         with pytest.raises(ValidationError, match="requires a numeric value"):
@@ -163,6 +180,39 @@ class TestConditionSpec:
     def test_eq_op_accepts_scalar(self):
         # No mismatch on `eq` — it's the catch-all op for single values.
         ConditionSpec(field="reporter.customer.tier", op="eq", value="enterprise")
+
+    def test_in_op_coerces_scalar_to_singleton_list(self):
+        # LLMs frequently emit `"value": "closed"` for `op: in`. Coerce
+        # silently — the alternative is a re-parse loop with no useful
+        # signal. The condition is logically equivalent.
+        c = ConditionSpec(field="canonical.status", op="in", value="closed")
+        assert c.value == ["closed"]
+
+        c2 = ConditionSpec(field="canonical.closed_days_ago", op="in", value=7)
+        assert c2.value == [7]
+
+    def test_gte_coerces_string_number(self):
+        # Same coercion logic for `"3"` → 3.0 on gte/lte. Real LLM output.
+        c = ConditionSpec(field="hits_in_window", op="gte", value="3", window="24h")
+        assert c.value == 3.0
+
+    def test_gte_rejects_non_numeric_string(self):
+        with pytest.raises(ValidationError, match="requires a numeric value"):
+            ConditionSpec(
+                field="hits_in_window", op="gte", value="lots", window="24h"
+            )
+
+    def test_gte_rejects_bool(self):
+        # `True > 5` evaluates in Python — reject explicitly so a bool
+        # smuggled in via JSON doesn't silently pass.
+        with pytest.raises(ValidationError, match="requires a numeric value"):
+            ConditionSpec(field="hits_in_window", op="gte", value=True, window="24h")
+
+    def test_hits_in_window_requires_window_parameter(self):
+        # The prompt says so; the executor enforces it. Surface at parse
+        # time so the LLM sees the feedback in the same loop.
+        with pytest.raises(ValidationError, match="requires a 'window' parameter"):
+            ConditionSpec(field="hits_in_window", op="gte", value=3)
 
 
 class TestActionEmailTo:
