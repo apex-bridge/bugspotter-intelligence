@@ -382,6 +382,20 @@ class RuleParserService:
                 raw_llm_output="",
             )
 
+        # Defensive empty / None / whitespace-only check: `_extract_json_object`
+        # calls `.strip()` on its arg, which crashes on None — and some
+        # mock providers or upstream rate-limit responses can return None
+        # or an empty body instead of raising. Surface as a clean
+        # structured error rather than an AttributeError or a misleading
+        # "no parseable JSON envelope" downstream.
+        if not raw or not raw.strip():
+            return RuleParserResult(
+                draft=None,
+                errors=["LLM returned an empty response. Please retry."],
+                clarifications=[],
+                raw_llm_output="",
+            )
+
         envelope = _extract_json_object(raw)
         if envelope is None:
             return RuleParserResult(
@@ -419,10 +433,12 @@ class RuleParserService:
             # which by default echoes the offending user-supplied value into
             # the log — the same info-leak class we scrubbed `raw[:500]` for.
             # Structured `loc` + `msg` + `type` are still preserved for
-            # diagnosis.
+            # diagnosis. Inline the errors into the message itself because
+            # the default `main.py` log format string doesn't render `extra`
+            # fields, so a structured-only log entry would be invisible.
             logger.info(
-                "LLM produced a draft that failed schema validation",
-                extra={"errors": ve.errors(include_input=False)},
+                "LLM produced a draft that failed schema validation: %s",
+                ve.errors(include_input=False),
             )
             return RuleParserResult(
                 draft=None,
@@ -450,7 +466,11 @@ def _to_str_list(value: object, limit: int = 10) -> list[str]:
     and always returns a clean list bounded by `limit`.
     """
     if isinstance(value, list):
-        return [str(v) for v in value][:limit]
+        # Slice before stringifying so an unexpectedly large LLM response
+        # doesn't churn through str() on every element only to throw the
+        # tail away. Common in the wild: the LLM returns a 1000-element
+        # `errors` array on a confused parse.
+        return [str(v) for v in value[:limit]]
     if value is None:
         return []
     return [str(value)][:limit]

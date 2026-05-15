@@ -318,6 +318,26 @@ class TestRuleParserService:
         assert result.raw_llm_output == ""
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("empty_response", [None, "", "   ", "\n\n"])
+    async def test_empty_llm_response_returns_structured_error(
+        self, empty_response: str | None
+    ):
+        # If the LLM returns None / empty / whitespace-only, `.strip()` in
+        # `_extract_json_object` would crash on None. We surface a clean
+        # structured error instead. Covers a mock-provider edge case and
+        # genuine upstream silence (some providers return empty body on
+        # rate-limit instead of raising).
+        llm = MagicMock(spec=LLMProvider)
+        llm.generate = AsyncMock(return_value=empty_response)
+        service = RuleParserService(llm)
+
+        result = await service.parse_nl_to_rule(nl="dummy")
+
+        assert result.draft is None
+        assert len(result.errors) == 1
+        assert "empty" in result.errors[0].lower() or "retry" in result.errors[0].lower()
+
+    @pytest.mark.asyncio
     async def test_llm_returns_errors_as_string_not_list(self):
         # The schema asks for `errors: list[str]`, but small models
         # sometimes return a scalar. Without normalization the old code
