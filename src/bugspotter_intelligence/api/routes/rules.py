@@ -11,10 +11,9 @@ returns a draft for the admin to review before saving.
 
 from fastapi import APIRouter, Depends
 
-from bugspotter_intelligence.api.deps import get_llm_provider, get_settings
+from bugspotter_intelligence.api.deps import get_rule_parser_service, get_settings
 from bugspotter_intelligence.auth import TenantContext
 from bugspotter_intelligence.config import Settings
-from bugspotter_intelligence.llm import LLMProvider
 from bugspotter_intelligence.models.requests import ParseNLRuleRequest
 from bugspotter_intelligence.models.responses import ParseNLRuleResponse
 from bugspotter_intelligence.rate_limiting import check_rate_limit
@@ -27,7 +26,7 @@ router = APIRouter(prefix="/rules", tags=["Rules"])
 async def parse_nl_rule(
     body: ParseNLRuleRequest,
     tenant: TenantContext = Depends(check_rate_limit),
-    provider: LLMProvider = Depends(get_llm_provider),
+    service: RuleParserService = Depends(get_rule_parser_service),
     settings: Settings = Depends(get_settings),
 ) -> ParseNLRuleResponse:
     """Convert a natural-language rule description into a structured DedupRule.
@@ -36,7 +35,6 @@ async def parse_nl_rule(
     surface it. `raw_llm_output` is included for debugging — the UI should
     not display it to end users by default.
     """
-    service = RuleParserService(provider)
     result = await service.parse_nl_to_rule(
         nl=body.nl,
         available_integrations=body.available_integrations,

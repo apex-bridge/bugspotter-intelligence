@@ -363,8 +363,18 @@ class RuleParserService:
                 # noticeable cost into the typical short-rule path.
                 max_tokens=1500,
             )
-        except Exception:
-            logger.exception("LLM generate failed during rule parse")
+        except Exception as exc:
+            # `logger.exception` would dump the full traceback; some HTTP
+            # client libs surface response bodies that include
+            # `Authorization` headers or chunks of the prompt in the
+            # stringified exception. Log only the exception type and a
+            # generic message — that's enough to triage a provider
+            # outage without risking a secret in the log stream. If
+            # deeper debugging is needed, the operator can flip the
+            # logger to DEBUG-level temporarily.
+            logger.error(
+                "LLM generate failed during rule parse: %s", type(exc).__name__
+            )
             return RuleParserResult(
                 draft=None,
                 errors=["Failed to generate a rule draft. Please retry."],
