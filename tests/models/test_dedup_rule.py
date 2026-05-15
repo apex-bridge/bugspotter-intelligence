@@ -126,6 +126,13 @@ class TestWindowPattern:
         with pytest.raises(ValidationError):
             TriggerClusterGrowing(threshold=5, window=bad)
 
+    @pytest.mark.parametrize("bad", ["0s", "0h", "0d", "00h"])
+    def test_trigger_window_rejects_zero_duration(self, bad: str):
+        # Zero-duration windows would make conditions meaningless and
+        # rate-limits permissive — reject at parse time.
+        with pytest.raises(ValidationError):
+            TriggerClusterGrowing(threshold=5, window=bad)
+
     def test_rate_limit_window_pattern(self):
         RateLimit(count=1, window="1h")  # ok
         with pytest.raises(ValidationError):

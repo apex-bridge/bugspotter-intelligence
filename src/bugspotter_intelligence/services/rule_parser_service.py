@@ -356,7 +356,12 @@ class RuleParserService:
             raw = await self.llm.generate(
                 prompt=prompt,
                 temperature=0.1,
-                max_tokens=800,
+                # A complex rule with multiple conditions / actions plus
+                # the wrapping envelope can easily reach ~1200 output
+                # tokens — 800 truncated mid-JSON for the long-tail
+                # cases. 1500 is a generous ceiling without putting any
+                # noticeable cost into the typical short-rule path.
+                max_tokens=1500,
             )
         except Exception:
             logger.exception("LLM generate failed during rule parse")
@@ -400,9 +405,14 @@ class RuleParserService:
             # schema mismatch and risks pulling sensitive text into the
             # server log stream. The raw output is still returned in the
             # response for client-side debugging.
+            # `include_input=False` strips each error entry's `input` field,
+            # which by default echoes the offending user-supplied value into
+            # the log — the same info-leak class we scrubbed `raw[:500]` for.
+            # Structured `loc` + `msg` + `type` are still preserved for
+            # diagnosis.
             logger.info(
                 "LLM produced a draft that failed schema validation",
-                extra={"errors": ve.errors()},
+                extra={"errors": ve.errors(include_input=False)},
             )
             return RuleParserResult(
                 draft=None,

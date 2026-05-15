@@ -44,11 +44,17 @@ async def parse_nl_rule(
         available_email_templates=body.available_email_templates,
     )
 
-    # `settings.{provider}_model` is the model identifier (e.g.
-    # "llama3.2:3b"); falling back to the provider name ("ollama") would
-    # silently put the wrong value into the response. Use a sentinel
-    # instead so consumers can detect the misconfiguration.
-    model = getattr(settings, f"{settings.llm_provider}_model", "unknown")
+    # Resolve the model identifier (e.g. "llama3.2:3b") for the response.
+    # Three failure modes to handle:
+    #   - attribute missing entirely (provider mis-spelled, partial config)
+    #   - attribute present but None (deserialized from a null setting)
+    #   - attribute present but empty string (untrimmed env var)
+    # Any of these would otherwise make `ParseNLRuleResponse(model: str)`
+    # fail Pydantic validation and surface as a 500. Coalesce to the
+    # `"unknown"` sentinel so consumers can detect the misconfiguration
+    # without the request failing outright.
+    raw_model = getattr(settings, f"{settings.llm_provider}_model", None)
+    model = raw_model if isinstance(raw_model, str) and raw_model.strip() else "unknown"
     return ParseNLRuleResponse(
         draft=result.draft,
         errors=result.errors,

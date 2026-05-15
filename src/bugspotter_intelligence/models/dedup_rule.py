@@ -28,7 +28,12 @@ from pydantic import BaseModel, Field, HttpUrl, model_validator
 # Accepts forms like "30s", "1h", "24h", "7d", "1w" — the rule executor
 # parses these into seconds. Restricting at the schema level prevents the
 # LLM from emitting wild values like "an hour" or "1 hr".
-_WINDOW_PATTERN = r"^\d+[smhdw]$"
+#
+# The leading `[1-9]\d*` enforces a strictly positive integer — zero-
+# duration windows ("0s", "0h") would silently make conditions
+# meaningless and rate-limits permissive, so we reject them at parse
+# time rather than depending on the executor to notice.
+_WINDOW_PATTERN = r"^[1-9]\d*[smhdw]$"
 
 # Standard 5-field cron (`min hour day month dow`). Deliberately loose —
 # this catches typos / prose like "every monday" but doesn't validate
