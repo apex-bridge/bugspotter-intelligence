@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from psycopg import AsyncConnection
+from psycopg.errors import DataError, IntegrityError
 
 from bugspotter_intelligence.api.deps import get_db_connection
 from bugspotter_intelligence.auth import TenantContext
@@ -10,6 +11,10 @@ from bugspotter_intelligence.models.responses import SubmitFeedbackResponse
 from bugspotter_intelligence.rate_limiting import check_rate_limit
 
 router = APIRouter(prefix="/intelligence", tags=["Intelligence"])
+
+# Sentinel used in place of NULL for anonymous feedback so the (event_id, user_ref)
+# UNIQUE constraint actually dedupes — Postgres treats NULLs as distinct.
+_ANON_USER_REF = "<ANON>"
 
 
 @router.post("/feedback", response_model=SubmitFeedbackResponse, status_code=201)
@@ -23,6 +28,8 @@ async def submit_feedback(
     The event must belong to the caller's tenant; cross-tenant feedback is rejected
     with 404 (intentionally indistinguishable from "event doesn't exist").
     """
+    user_ref = body.user_ref or _ANON_USER_REF
+
     async with conn.cursor() as cur:
         await cur.execute(
             "SELECT tenant_id FROM intelligence_event WHERE id = %s",
@@ -44,12 +51,12 @@ async def submit_feedback(
                   SET verdict = EXCLUDED.verdict, note = EXCLUDED.note
                 RETURNING id
                 """,
-                (body.event_id, tenant.tenant_id, body.verdict, body.user_ref, body.note),
+                (body.event_id, tenant.tenant_id, body.verdict, user_ref, body.note),
             )
-        except Exception as exc:
-            # Surface as 400 — the event existed (we just checked) but the
-            # insert was rejected for another reason. Detail intentionally
-            # generic; logs have the type.
+        except (IntegrityError, DataError) as exc:
+            # Validation-class write rejections only (constraint / type / range).
+            # Operational errors (connection, transaction abort) fall through to
+            # the global 500 handler so we don't mask outages as client errors.
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Could not record feedback",

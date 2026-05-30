@@ -26,9 +26,11 @@ def price_micros(
             break
     if p_in is None:
         return None
+    # round() not //: integer division on cheap models (e.g. 5 tokens × $0.15/Mtok)
+    # truncates to 0 micros and systematically under-counts cost over volume.
     cost = 0
     if tokens_in:
-        cost += (tokens_in * p_in) // 1_000_000
+        cost += int(round((tokens_in * p_in) / 1_000_000))
     if tokens_out:
-        cost += (tokens_out * p_out) // 1_000_000
+        cost += int(round((tokens_out * p_out) / 1_000_000))
     return cost

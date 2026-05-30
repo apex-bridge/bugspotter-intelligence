@@ -53,9 +53,15 @@ class OllamaProvider(LLMProvider):
                 result = response.json()
                 text = result["response"]
             except httpx.HTTPStatusError as e:
-                raise Exception(f"Ollama API error: {e.response.status_code} - {e.response.text}")
-            except KeyError:
-                raise Exception(f"Unexpected Ollama response format: {response.text}")
+                raise RuntimeError(
+                    f"Ollama API error: {e.response.status_code} - {e.response.text}"
+                ) from e
+            except (ValueError, KeyError) as e:
+                # ValueError covers JSONDecodeError (malformed body); KeyError
+                # covers a response with missing "response" key.
+                raise RuntimeError(
+                    f"Unexpected Ollama response format: {response.text}"
+                ) from e
 
             usage = Usage(
                 input=result.get("prompt_eval_count"),

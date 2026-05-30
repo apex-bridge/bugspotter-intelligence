@@ -54,28 +54,35 @@ class LLMReranker:
             return [], True, None
 
         prompt = self._build_prompt(query, candidates)
-
-        async def _call() -> tuple[str, UUID | None]:
-            if tenant_id is None:
-                text = await self.llm_provider.generate(
-                    prompt=prompt, temperature=0.0, max_tokens=200,
-                )
-                return text, None
-            ctx = CallContext(
-                tenant_id=tenant_id,
-                operation="search_rerank",
-                prompt_version=_RERANK_PROMPT_VERSION,
-                meta={"candidate_count": len(candidates), "return_limit": return_limit},
-            )
-            return await record_generate(
-                self.llm_provider, prompt, ctx=ctx,
-                temperature=0.0, max_tokens=200,
-            )
+        event_id: UUID | None = None
 
         try:
-            raw_response, event_id = await asyncio.wait_for(
-                _call(), timeout=self.timeout_seconds,
-            )
+            if tenant_id is None:
+                # No-observability path (tests / callers without a tenant context):
+                # keep an outer asyncio.wait_for to enforce the timeout.
+                raw_response = await asyncio.wait_for(
+                    self.llm_provider.generate(
+                        prompt=prompt, temperature=0.0, max_tokens=200,
+                    ),
+                    timeout=self.timeout_seconds,
+                )
+            else:
+                ctx = CallContext(
+                    tenant_id=tenant_id,
+                    operation="search_rerank",
+                    prompt_version=_RERANK_PROMPT_VERSION,
+                    meta={
+                        "candidate_count": len(candidates),
+                        "return_limit": return_limit,
+                    },
+                )
+                # Pass timeout to the recorder so it runs in the same task as
+                # _persist_event — outer wait_for here would cancel persistence.
+                raw_response, event_id = await record_generate(
+                    self.llm_provider, prompt, ctx=ctx,
+                    temperature=0.0, max_tokens=200,
+                    timeout=self.timeout_seconds,
+                )
 
             scores = self._parse_scores(raw_response, len(candidates))
 
@@ -90,18 +97,18 @@ class LLMReranker:
 
             return reranked, True, event_id
 
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as e:
             logger.warning(
                 f"LLM reranking timed out after {self.timeout_seconds}s, "
                 "falling back to original ordering"
             )
-            return candidates[:return_limit], False, None
+            return candidates[:return_limit], False, getattr(e, "event_id", None)
 
         except Exception as e:
             logger.warning(
                 f"LLM reranking failed: {e}, falling back to original ordering"
             )
-            return candidates[:return_limit], False, None
+            return candidates[:return_limit], False, getattr(e, "event_id", None)
 
     def _build_prompt(self, query: str, candidates: list[dict]) -> str:
         """Build the scoring prompt for the LLM."""

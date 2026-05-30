@@ -177,8 +177,8 @@ The client (`bugspotter-private` / `bugspotter-public` admin UI) uses `event_id`
 
 ### Feedback (caller-facing)
 
-```
-POST /v1/intelligence/feedback
+```http
+POST /api/v1/intelligence/feedback
   body: { event_id, verdict: "correct"|"incorrect"|"partial", user_ref?, note? }
   auth: tenant API key; rejects if event_id.tenant_id != caller tenant
   -> 201 { feedback_id }
@@ -186,16 +186,16 @@ POST /v1/intelligence/feedback
 
 ### Observability (admin)
 
-All under `/admin/observability/*`, require admin API key, filtered by `?tenant_id=` (admin can scope to one tenant or all).
+All under `/api/v1/admin/observability/*`, require admin API key. Scope is **always the caller's tenant**; there is no cross-tenant query — an explicit tenant_id query param would be a BOLA vector with the current admin scoping (`is_admin` is per-tenant, not global super-admin). If cross-tenant analytics are ever needed they will go through a separate master-key endpoint.
 
-```
-GET /admin/observability/summary?tenant_id=&from=&to=
-  -> { calls, cost_usd, p50_ms, p95_ms, cache_hit_rate, by_operation: [...] }
+```http
+GET /api/v1/admin/observability/summary?from=&to=
+  -> { calls, cost_micros_usd, p50_ms, p95_ms, error_rate, by_operation: [...] }
 
-GET /admin/observability/events?tenant_id=&operation=&status=&limit=&offset=
+GET /api/v1/admin/observability/events?operation=&status=&limit=&offset=
   -> paginated event rows
 
-GET /admin/observability/accuracy?tenant_id=&operation=&from=&to=
+GET /api/v1/admin/observability/accuracy?operation=&from=&to=
   -> { feedback_count, correct, incorrect, partial, precision }
 ```
 
@@ -215,7 +215,7 @@ Wire into `create_tables()` in order: events before feedback (FK dependency). Ea
 ## UI integration (lives in `bugspotter-public` / `bugspotter-private`)
 
 Out of scope for this repo, but the contract:
-- Search result card renders 👍/👎 buttons; on click → `POST /v1/intelligence/feedback` with the `event_id` from the response.
+- Search result card renders 👍/👎 buttons; on click → `POST /api/v1/intelligence/feedback` with the `event_id` from the response.
 - Confidence < 0.6 → yellow "needs review" badge; > 0.85 → no badge; in between → muted "AI-suggested".
 - Admin dashboard page consumes the three observability endpoints; one chart per operation (latency p95, accuracy, cost).
 
@@ -229,7 +229,7 @@ Ship in this order — each step is independently shippable:
 2. `generate_with_usage` on base provider + Anthropic + Ollama providers — 1 day.
 3. `record_generate` wrapper + retrofit the three call sites — 1 day.
 4. `event_id` + `confidence` added to `SearchResponse` — half-day.
-5. `POST /v1/intelligence/feedback` + auth check — 1 day.
+5. `POST /api/v1/intelligence/feedback` + auth check — 1 day.
 6. `GET /admin/observability/summary` + `accuracy` — 1 day.
 7. UI in `bugspotter-public`: thumbs on search cards + confidence badge — 1–2 days (separate repo).
 

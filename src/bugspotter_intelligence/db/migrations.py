@@ -159,6 +159,22 @@ async def create_intelligence_feedback_table(conn: AsyncConnection) -> None:
             ON intelligence_feedback(tenant_id, created_at DESC)
         """)
 
+        # FK index: cascade DELETE on intelligence_event and the accuracy JOIN
+        # would otherwise scan the full feedback table.
+        await cursor.execute("""
+            CREATE INDEX IF NOT EXISTS intelligence_feedback_event_idx
+            ON intelligence_feedback(event_id)
+        """)
+
+        # Plain UNIQUE treats NULLs as distinct, so anonymous feedback
+        # (user_ref IS NULL) could insert unlimited duplicate rows. Endpoint
+        # normalizes user_ref to a sentinel for belt-and-suspenders dedup;
+        # this partial index is the DB-side guard.
+        await cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS intelligence_feedback_event_anon_idx
+            ON intelligence_feedback (event_id) WHERE user_ref IS NULL
+        """)
+
         await conn.commit()
         print("✅ intelligence_feedback table created successfully")
 

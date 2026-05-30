@@ -6,9 +6,11 @@ instead of `provider.generate(prompt)`. Returns `(text, event_id)`.
 Persistence failures never propagate — the wrapped LLM call's outcome
 is what the caller cares about. The original exception (if any) is
 re-raised after the event is persisted so caller fallback paths keep
-working.
+working; the persisted event_id is attached to the exception as
+`event_id` so callers can still surface it for debugging.
 """
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
@@ -49,8 +51,19 @@ async def record_generate(
     context: Optional[list[str]] = None,
     temperature: float = 0.7,
     max_tokens: int = 1000,
+    timeout: Optional[float] = None,
 ) -> tuple[str, Optional[UUID]]:
-    """Invoke provider.generate_with_usage(...), persist an intelligence_event, return (text, event_id)."""
+    """Invoke provider.generate_with_usage(...), persist an intelligence_event, return (text, event_id).
+
+    If `timeout` is set, the provider call is wrapped in asyncio.wait_for so the
+    timeout is recorded as a normal error event. Callers that wrap this with
+    their own asyncio.wait_for risk cancelling persistence — pass `timeout`
+    here instead.
+
+    On exception (including TimeoutError and CancelledError), the persisted
+    event_id is attached to the exception as `event_id` before re-raising so
+    callers can still surface it for debugging.
+    """
     started = time.perf_counter()
     status = "ok"
     err_kind: Optional[str] = None
@@ -59,12 +72,23 @@ async def record_generate(
     usage = Usage()
     pending_exc: Optional[BaseException] = None
     try:
-        text, usage = await provider.generate_with_usage(
+        gen_coro = provider.generate_with_usage(
             prompt=prompt,
             context=context,
             temperature=temperature,
             max_tokens=max_tokens,
         )
+        if timeout is not None:
+            text, usage = await asyncio.wait_for(gen_coro, timeout=timeout)
+        else:
+            text, usage = await gen_coro
+    except asyncio.CancelledError as exc:
+        # Outer task cancellation — still record it, then re-raise so the
+        # cancellation actually propagates.
+        status = "error"
+        err_kind = "CancelledError"
+        err_message = "request cancelled"
+        pending_exc = exc
     except Exception as exc:
         status = "error"
         err_kind = type(exc).__name__
@@ -73,7 +97,7 @@ async def record_generate(
 
     latency_ms = int((time.perf_counter() - started) * 1000)
     provider_name = _resolve_provider_name(provider)
-    model = _resolve_model(provider)
+    model = _resolve_model(provider, provider_name)
     cost = price_micros(provider_name, model, usage.input, usage.output)
 
     meta = dict(ctx.meta)
@@ -84,7 +108,9 @@ async def record_generate(
 
     event_id: Optional[UUID] = None
     try:
-        event_id = await _persist_event(
+        # Shield persistence from any further outer cancellation so the audit
+        # row lands even if the caller's task is being torn down.
+        event_id = await asyncio.shield(_persist_event(
             tenant_id=ctx.tenant_id,
             operation=ctx.operation,
             bug_id=ctx.bug_id,
@@ -101,29 +127,44 @@ async def record_generate(
             error_kind=err_kind,
             cached=ctx.cached,
             meta=meta,
-        )
+        ))
+    except asyncio.CancelledError:
+        # The shielded task keeps running; we just lose visibility into its id.
+        # Re-raised below if there's no pending exception already.
+        if pending_exc is None:
+            raise
     except Exception:
         # Observability must never break the user-facing path.
         logger.exception("Failed to persist intelligence_event")
 
     if pending_exc is not None:
+        if event_id is not None:
+            try:
+                setattr(pending_exc, "event_id", event_id)
+            except (AttributeError, TypeError):
+                pass
         raise pending_exc
     return text, event_id
 
 
 def _resolve_provider_name(provider: LLMProvider) -> str:
+    # Prefer the actual class name so dynamic/test/fallback provider instances
+    # are logged accurately. Settings is consulted only as a fallback for
+    # providers whose class name doesn't follow the *Provider convention.
+    name = type(provider).__name__
+    if name.endswith("Provider") and name != "Provider":
+        return name[:-len("Provider")].lower()
     settings = getattr(provider, "settings", None)
     raw = getattr(settings, "llm_provider", None) if settings else None
     if isinstance(raw, str) and raw.strip():
         return raw.lower()
-    return type(provider).__name__.replace("Provider", "").lower()
+    return name.lower()
 
 
-def _resolve_model(provider: LLMProvider) -> str:
+def _resolve_model(provider: LLMProvider, provider_name: str) -> str:
     settings = getattr(provider, "settings", None)
     if settings is None:
         return "unknown"
-    provider_name = _resolve_provider_name(provider)
     raw = getattr(settings, f"{provider_name}_model", None)
     return raw if isinstance(raw, str) and raw.strip() else "unknown"
 

@@ -1,7 +1,9 @@
-"""Tests for OllamaProvider.generate_with_usage — token + duration extraction."""
+"""Tests for OllamaProvider.generate_with_usage — token + duration extraction + error paths."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from bugspotter_intelligence.config import Settings
@@ -72,3 +74,56 @@ async def test_generate_still_returns_just_text(provider):
         text = await provider.generate(prompt="hi")
 
     assert text == "answer"
+
+
+@pytest.mark.asyncio
+async def test_http_error_wrapped_with_cause(provider):
+    """5xx from Ollama → RuntimeError with original HTTPStatusError as __cause__."""
+    with patch("httpx.AsyncClient") as mock_client:
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.text = "internal server error"
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "500 Server Error", request=MagicMock(), response=mock_response,
+        )
+        mock_post = AsyncMock(return_value=mock_response)
+        mock_client.return_value.__aenter__.return_value.post = mock_post
+
+        with pytest.raises(RuntimeError, match="500") as ei:
+            await provider.generate_with_usage(prompt="hi")
+
+    assert isinstance(ei.value.__cause__, httpx.HTTPStatusError)
+
+
+@pytest.mark.asyncio
+async def test_malformed_json_body_wrapped_with_cause(provider):
+    """JSONDecodeError → RuntimeError that mentions the raw body and preserves cause."""
+    with patch("httpx.AsyncClient") as mock_client:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = "not actually json"
+        mock_response.json.side_effect = json.JSONDecodeError("expecting value", "doc", 0)
+        mock_post = AsyncMock(return_value=mock_response)
+        mock_client.return_value.__aenter__.return_value.post = mock_post
+
+        with pytest.raises(RuntimeError, match="Unexpected Ollama response format") as ei:
+            await provider.generate_with_usage(prompt="hi")
+
+    assert isinstance(ei.value.__cause__, ValueError)  # JSONDecodeError is a ValueError
+
+
+@pytest.mark.asyncio
+async def test_missing_response_key_wrapped_with_cause(provider):
+    """KeyError on result['response'] → RuntimeError with KeyError as cause."""
+    with patch("httpx.AsyncClient") as mock_client:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = '{"prompt_eval_count": 1}'
+        mock_response.json.return_value = {"prompt_eval_count": 1}
+        mock_post = AsyncMock(return_value=mock_response)
+        mock_client.return_value.__aenter__.return_value.post = mock_post
+
+        with pytest.raises(RuntimeError, match="Unexpected Ollama response format") as ei:
+            await provider.generate_with_usage(prompt="hi")
+
+    assert isinstance(ei.value.__cause__, KeyError)

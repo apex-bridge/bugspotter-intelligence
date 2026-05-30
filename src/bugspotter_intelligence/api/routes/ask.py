@@ -47,9 +47,11 @@ async def ask_question(
         max_tokens=body.max_tokens,
     )
 
+    raw_model = getattr(settings, f"{settings.llm_provider}_model", None)
+    model = raw_model if isinstance(raw_model, str) and raw_model.strip() else "unknown"
     return AskResponse(
         answer=answer,
         provider=settings.llm_provider,
-        model=getattr(settings, f"{settings.llm_provider}_model"),
+        model=model,
         event_id=event_id,
     )

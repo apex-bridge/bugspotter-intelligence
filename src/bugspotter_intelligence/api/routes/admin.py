@@ -206,20 +206,16 @@ def _build_time_window(
 
 @router.get("/observability/summary", response_model=ObservabilitySummaryResponse)
 async def observability_summary(
-    tenant_id: UUID | None = Query(None, description="Scope to one tenant; omit for all"),
     from_ts: datetime | None = Query(None, alias="from"),
     to_ts: datetime | None = Query(None, alias="to"),
     tenant: TenantContext = Depends(check_rate_limit_admin),
     conn: AsyncConnection = Depends(get_db_connection),
 ) -> ObservabilitySummaryResponse:
-    """Aggregated stats over intelligence_event in a time window."""
-    where: list[str] = []
-    params: list = []
-    if tenant_id is not None:
-        where.append("tenant_id = %s")
-        params.append(tenant_id)
+    """Aggregated stats over intelligence_event in a time window; scoped to caller's tenant."""
+    where: list[str] = ["tenant_id = %s"]
+    params: list = [tenant.tenant_id]
     _build_time_window(where, params, from_ts, to_ts)
-    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    where_sql = "WHERE " + " AND ".join(where)
 
     async with conn.cursor() as cur:
         await cur.execute(
@@ -264,7 +260,7 @@ async def observability_summary(
     error_rate = (errors / calls) if calls else 0.0
 
     return ObservabilitySummaryResponse(
-        tenant_id=tenant_id,
+        tenant_id=tenant.tenant_id,
         from_ts=from_ts,
         to_ts=to_ts,
         calls=calls,
@@ -278,7 +274,6 @@ async def observability_summary(
 
 @router.get("/observability/events", response_model=ObservabilityEventsResponse)
 async def observability_events(
-    tenant_id: UUID | None = Query(None),
     operation: str | None = Query(None),
     event_status: Literal["ok", "error"] | None = Query(None, alias="status"),
     limit: int = Query(50, ge=1, le=500),
@@ -286,19 +281,16 @@ async def observability_events(
     tenant: TenantContext = Depends(check_rate_limit_admin),
     conn: AsyncConnection = Depends(get_db_connection),
 ) -> ObservabilityEventsResponse:
-    """Recent intelligence_event rows, newest first; for ad-hoc debugging."""
-    where: list[str] = []
-    params: list = []
-    if tenant_id is not None:
-        where.append("tenant_id = %s")
-        params.append(tenant_id)
+    """Recent intelligence_event rows, newest first; scoped to caller's tenant."""
+    where: list[str] = ["tenant_id = %s"]
+    params: list = [tenant.tenant_id]
     if operation is not None:
         where.append("operation = %s")
         params.append(operation)
     if event_status is not None:
         where.append("status = %s")
         params.append(event_status)
-    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    where_sql = "WHERE " + " AND ".join(where)
     params_with_pagination = params + [limit, offset]
 
     async with conn.cursor() as cur:
@@ -331,19 +323,15 @@ async def observability_events(
 
 @router.get("/observability/accuracy", response_model=ObservabilityAccuracyResponse)
 async def observability_accuracy(
-    tenant_id: UUID | None = Query(None),
     operation: str | None = Query(None),
     from_ts: datetime | None = Query(None, alias="from"),
     to_ts: datetime | None = Query(None, alias="to"),
     tenant: TenantContext = Depends(check_rate_limit_admin),
     conn: AsyncConnection = Depends(get_db_connection),
 ) -> ObservabilityAccuracyResponse:
-    """Verdict counts and precision over intelligence_feedback joined with intelligence_event."""
-    where: list[str] = []
-    params: list = []
-    if tenant_id is not None:
-        where.append("f.tenant_id = %s")
-        params.append(tenant_id)
+    """Verdict counts + precision; scoped to caller's tenant via feedback × event JOIN."""
+    where: list[str] = ["f.tenant_id = %s"]
+    params: list = [tenant.tenant_id]
     if operation is not None:
         where.append("e.operation = %s")
         params.append(operation)
@@ -353,7 +341,7 @@ async def observability_accuracy(
     if to_ts is not None:
         where.append("f.created_at <= %s")
         params.append(to_ts)
-    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    where_sql = "WHERE " + " AND ".join(where)
 
     async with conn.cursor() as cur:
         await cur.execute(
@@ -375,7 +363,7 @@ async def observability_accuracy(
     precision = (correct / denom) if denom > 0 else None
 
     return ObservabilityAccuracyResponse(
-        tenant_id=tenant_id,
+        tenant_id=tenant.tenant_id,
         operation=operation,
         feedback_count=total,
         correct=correct,

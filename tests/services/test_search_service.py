@@ -346,6 +346,32 @@ class TestSearchSmart:
         assert call_args.args[1] == sample_search_results
 
     @pytest.mark.asyncio
+    async def test_forwards_tenant_id_and_surfaces_event_id(
+        self,
+        smart_search_service,
+        mock_reranker,
+        mock_db_connection,
+        sample_search_results,
+    ):
+        """Smart search must thread tenant_id into rerank and bubble its event_id."""
+        from uuid import uuid4 as _uuid4
+        tid = uuid4()
+        event_id = _uuid4()
+        mock_reranker.rerank = AsyncMock(return_value=(sample_search_results, True, event_id))
+
+        with patch(
+            "bugspotter_intelligence.services.search_service.BugRepository.search",
+            new_callable=AsyncMock,
+            return_value=(sample_search_results, 2),
+        ):
+            result = await smart_search_service.search_smart(
+                mock_db_connection, "query", tenant_id=tid, limit=5
+            )
+
+        assert mock_reranker.rerank.call_args.kwargs["tenant_id"] == tid
+        assert result["event_id"] == str(event_id)
+
+    @pytest.mark.asyncio
     async def test_mode_is_smart_when_llm_used(
         self, smart_search_service, mock_reranker, mock_db_connection
     ):
@@ -550,3 +576,415 @@ class TestSearchCacheIntegration:
         assert f":t3:" in set_key
         assert str(tid) in get_key
         assert str(tid) in set_key
+
+
+# ---------------------------------------------------------------------------
+# Edge-case coverage. Grouped by what each class surfaces:
+#
+#   TestSearchContractGaps        — tests that FAIL on current code, exposing
+#                                   docstring/contract violations (real bugs).
+#   TestSearchDocumentedBehavior  — tests that pass and pin behavior the code
+#                                   does today but no test currently asserts.
+#   TestSearchEdgeInputs          — defensive coverage for unusual inputs that
+#                                   should not blow up.
+# ---------------------------------------------------------------------------
+
+
+class TestSearchContractGaps:
+    """
+    Tests that EXPOSE real bugs by asserting behavior the docstrings and
+    soft-fail conventions promise but the code does not currently deliver.
+    Each test failure is a finding, not flaky CI.
+    """
+
+    @pytest.fixture
+    def cached_smart_service(
+        self, mock_embedding_provider, mock_reranker, mock_cache_service
+    ):
+        return SearchService(
+            mock_embedding_provider,
+            reranker=mock_reranker,
+            smart_candidate_limit=20,
+            cache=mock_cache_service,
+            cache_ttl_fast=300,
+            cache_ttl_smart=900,
+        )
+
+    @pytest.mark.asyncio
+    async def test_smart_search_falls_back_when_reranker_raises(
+        self, smart_search_service, mock_reranker, mock_db_connection,
+        sample_search_results,
+    ):
+        """
+        Docstring (line 132): 'Falls back to fast mode if the reranker is
+        unavailable OR FAILS.' Today the code only handles the
+        unavailable=None case; a raising reranker propagates the exception
+        and breaks the request.
+        """
+        tid = uuid4()
+        mock_reranker.rerank = AsyncMock(side_effect=RuntimeError("rerank kaboom"))
+
+        with patch(
+            "bugspotter_intelligence.services.search_service.BugRepository.search",
+            new_callable=AsyncMock,
+            return_value=(sample_search_results, 2),
+        ):
+            result = await smart_search_service.search_smart(
+                mock_db_connection, "q", tenant_id=tid, limit=5
+            )
+
+        # Promised fallback shape: fast results, mode=fast, no event_id.
+        assert result["mode"] == "fast"
+        assert result["results"] == sample_search_results
+
+    @pytest.mark.asyncio
+    async def test_search_fast_soft_fails_on_cache_get_error(
+        self, mock_embedding_provider, mock_cache_service, mock_db_connection,
+        sample_search_results,
+    ):
+        """
+        Cache is opt-in and best-effort: a failing cache backend must NOT
+        break the search. Today cache.get's exception propagates.
+        """
+        service = SearchService(mock_embedding_provider, cache=mock_cache_service)
+        tid = uuid4()
+        mock_cache_service.get = AsyncMock(side_effect=ConnectionError("redis down"))
+
+        with patch(
+            "bugspotter_intelligence.services.search_service.BugRepository.search",
+            new_callable=AsyncMock,
+            return_value=(sample_search_results, 2),
+        ):
+            result = await service.search_fast(
+                mock_db_connection, "q", tenant_id=tid
+            )
+
+        assert result["results"] == sample_search_results
+        assert result["cached"] is False
+
+    @pytest.mark.asyncio
+    async def test_search_fast_soft_fails_on_cache_set_error(
+        self, mock_embedding_provider, mock_cache_service, mock_db_connection,
+        sample_search_results,
+    ):
+        """
+        Mirror of the above for the write path. cache.set throwing today
+        means the request returns 5xx even though the DB query succeeded.
+        """
+        service = SearchService(mock_embedding_provider, cache=mock_cache_service)
+        tid = uuid4()
+        mock_cache_service.get = AsyncMock(return_value=None)
+        mock_cache_service.set = AsyncMock(side_effect=ConnectionError("redis down"))
+
+        with patch(
+            "bugspotter_intelligence.services.search_service.BugRepository.search",
+            new_callable=AsyncMock,
+            return_value=(sample_search_results, 2),
+        ):
+            result = await service.search_fast(
+                mock_db_connection, "q", tenant_id=tid
+            )
+
+        assert result["results"] == sample_search_results
+        assert result["cached"] is False
+
+    @pytest.mark.asyncio
+    async def test_search_fast_soft_fails_on_tenant_version_error(
+        self, mock_embedding_provider, mock_cache_service, mock_db_connection,
+        sample_search_results,
+    ):
+        """get_tenant_version is called in BOTH _cache_get and _cache_set.
+        Either failure should soft-fail rather than break the request."""
+        service = SearchService(mock_embedding_provider, cache=mock_cache_service)
+        tid = uuid4()
+        mock_cache_service.get_tenant_version = AsyncMock(
+            side_effect=ConnectionError("redis down")
+        )
+
+        with patch(
+            "bugspotter_intelligence.services.search_service.BugRepository.search",
+            new_callable=AsyncMock,
+            return_value=(sample_search_results, 2),
+        ):
+            result = await service.search_fast(
+                mock_db_connection, "q", tenant_id=tid
+            )
+
+        assert result["results"] == sample_search_results
+
+
+class TestSearchDocumentedBehavior:
+    """
+    Tests that pin behavior the code does today but no existing test
+    asserts. These should pass — they exist so future refactors can't
+    quietly change semantics that callers (admin UI, public API) depend on.
+    """
+
+    @pytest.fixture
+    def cached_smart_service(
+        self, mock_embedding_provider, mock_reranker, mock_cache_service
+    ):
+        return SearchService(
+            mock_embedding_provider,
+            reranker=mock_reranker,
+            smart_candidate_limit=20,
+            cache=mock_cache_service,
+            cache_ttl_fast=300,
+            cache_ttl_smart=900,
+        )
+
+    @pytest.mark.asyncio
+    async def test_cache_hit_sets_event_id_to_none(
+        self, mock_embedding_provider, mock_cache_service, mock_db_connection,
+    ):
+        """Cache hit response must include event_id=None — admin UI relies on
+        the field being present (not missing) so it can show 'cached' badges."""
+        service = SearchService(mock_embedding_provider, cache=mock_cache_service)
+        tid = uuid4()
+        mock_cache_service.get = AsyncMock(return_value={
+            "results": [], "total": 0, "limit": 10, "offset": 0,
+            "mode": "fast", "query": "q", "cached": False,
+        })
+
+        result = await service.search_fast(mock_db_connection, "q", tenant_id=tid)
+
+        assert result["event_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_smart_cache_hit_skips_reranker(
+        self, cached_smart_service, mock_reranker, mock_cache_service,
+        mock_db_connection,
+    ):
+        """Cache hit on smart path must short-circuit BEFORE the reranker
+        call. Otherwise the cache saves nothing — the expensive LLM call
+        still happens."""
+        tid = uuid4()
+        mock_cache_service.get = AsyncMock(return_value={
+            "results": [], "total": 0, "limit": 5, "offset": 0,
+            "mode": "smart", "query": "q", "cached": False,
+        })
+
+        await cached_smart_service.search_smart(
+            mock_db_connection, "q", tenant_id=tid
+        )
+
+        mock_reranker.rerank.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_smart_does_not_cache_when_llm_fallback(
+        self, cached_smart_service, mock_reranker, mock_cache_service,
+        mock_db_connection,
+    ):
+        """If the reranker reported llm_used=False (intentional pass-through),
+        the result is the SAME as fast mode — caching under the smart key
+        would pollute future smart requests."""
+        tid = uuid4()
+        mock_cache_service.get = AsyncMock(return_value=None)
+        mock_reranker.rerank = AsyncMock(return_value=([], False, None))
+
+        with patch(
+            "bugspotter_intelligence.services.search_service.BugRepository.search",
+            new_callable=AsyncMock,
+            return_value=([], 0),
+        ):
+            await cached_smart_service.search_smart(
+                mock_db_connection, "q", tenant_id=tid
+            )
+
+        mock_cache_service.set.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_smart_caches_with_smart_ttl_on_llm_success(
+        self, cached_smart_service, mock_reranker, mock_cache_service,
+        mock_db_connection, sample_search_results,
+    ):
+        """Smart-mode cache writes must use ttl_smart=900, not ttl_fast=300."""
+        tid = uuid4()
+        mock_cache_service.get = AsyncMock(return_value=None)
+        mock_reranker.rerank = AsyncMock(
+            return_value=(sample_search_results, True, None)
+        )
+
+        with patch(
+            "bugspotter_intelligence.services.search_service.BugRepository.search",
+            new_callable=AsyncMock,
+            return_value=(sample_search_results, 2),
+        ):
+            await cached_smart_service.search_smart(
+                mock_db_connection, "q", tenant_id=tid, limit=5
+            )
+
+        mock_cache_service.set.assert_called_once()
+        assert mock_cache_service.set.call_args.kwargs["ttl_seconds"] == 900
+
+    @pytest.mark.asyncio
+    async def test_cache_key_changes_with_status_filter(
+        self, mock_embedding_provider, mock_cache_service, mock_db_connection,
+    ):
+        """Status filter must be part of the cache key — otherwise 'open' and
+        'resolved' queries collide and return each other's results."""
+        service = SearchService(mock_embedding_provider, cache=mock_cache_service)
+        tid = uuid4()
+        mock_cache_service.get = AsyncMock(return_value=None)
+
+        with patch(
+            "bugspotter_intelligence.services.search_service.BugRepository.search",
+            new_callable=AsyncMock,
+            return_value=([], 0),
+        ):
+            await service.search_fast(
+                mock_db_connection, "q", tenant_id=tid, status="open"
+            )
+            key_open = mock_cache_service.get.call_args.args[0]
+
+            await service.search_fast(
+                mock_db_connection, "q", tenant_id=tid, status="resolved"
+            )
+            key_resolved = mock_cache_service.get.call_args.args[0]
+
+        assert key_open != key_resolved
+
+    @pytest.mark.asyncio
+    async def test_cache_key_changes_with_date_filters(
+        self, mock_embedding_provider, mock_cache_service, mock_db_connection,
+    ):
+        """Date range filters must also segment the cache key."""
+        service = SearchService(mock_embedding_provider, cache=mock_cache_service)
+        tid = uuid4()
+        mock_cache_service.get = AsyncMock(return_value=None)
+
+        with patch(
+            "bugspotter_intelligence.services.search_service.BugRepository.search",
+            new_callable=AsyncMock,
+            return_value=([], 0),
+        ):
+            await service.search_fast(
+                mock_db_connection, "q", tenant_id=tid,
+                date_from=datetime(2025, 1, 1),
+            )
+            key_jan = mock_cache_service.get.call_args.args[0]
+
+            await service.search_fast(
+                mock_db_connection, "q", tenant_id=tid,
+                date_from=datetime(2025, 6, 1),
+            )
+            key_jun = mock_cache_service.get.call_args.args[0]
+
+        assert key_jan != key_jun
+
+    @pytest.mark.asyncio
+    async def test_cache_key_changes_with_pagination(
+        self, mock_embedding_provider, mock_cache_service, mock_db_connection,
+    ):
+        """Different pages must cache separately."""
+        service = SearchService(mock_embedding_provider, cache=mock_cache_service)
+        tid = uuid4()
+        mock_cache_service.get = AsyncMock(return_value=None)
+
+        with patch(
+            "bugspotter_intelligence.services.search_service.BugRepository.search",
+            new_callable=AsyncMock,
+            return_value=([], 0),
+        ):
+            await service.search_fast(
+                mock_db_connection, "q", tenant_id=tid, limit=10, offset=0
+            )
+            key_p1 = mock_cache_service.get.call_args.args[0]
+
+            await service.search_fast(
+                mock_db_connection, "q", tenant_id=tid, limit=10, offset=10
+            )
+            key_p2 = mock_cache_service.get.call_args.args[0]
+
+        assert key_p1 != key_p2
+
+
+class TestSearchEdgeInputs:
+    """Defensive coverage for inputs that should not crash the service."""
+
+    @pytest.mark.asyncio
+    async def test_smart_handles_empty_reranker_output(
+        self, smart_search_service, mock_reranker, mock_db_connection,
+    ):
+        """Reranker returning [] (no candidates passed its filter) must yield
+        an empty result list, not a crash."""
+        tid = uuid4()
+        mock_reranker.rerank = AsyncMock(return_value=([], True, None))
+
+        with patch(
+            "bugspotter_intelligence.services.search_service.BugRepository.search",
+            new_callable=AsyncMock,
+            return_value=([{"bug_id": "bug-1"}], 1),
+        ):
+            result = await smart_search_service.search_smart(
+                mock_db_connection, "q", tenant_id=tid, limit=5
+            )
+
+        assert result["results"] == []
+        # total still reflects the DB count, not the reranker's filtering.
+        assert result["total"] == 1
+
+    @pytest.mark.asyncio
+    async def test_smart_handles_reranker_returning_fewer_than_requested(
+        self, smart_search_service, mock_reranker, mock_db_connection,
+    ):
+        """If reranker returns fewer items than (offset + limit), slicing
+        must not error — Python returns the shorter tail silently."""
+        tid = uuid4()
+        # 3 items returned, caller asks for offset=2 limit=5 → expect [item3]
+        reranked = [{"bug_id": f"bug-{i}"} for i in range(3)]
+        mock_reranker.rerank = AsyncMock(return_value=(reranked, True, None))
+
+        with patch(
+            "bugspotter_intelligence.services.search_service.BugRepository.search",
+            new_callable=AsyncMock,
+            return_value=(reranked, 3),
+        ):
+            result = await smart_search_service.search_smart(
+                mock_db_connection, "q", tenant_id=tid, limit=5, offset=2
+            )
+
+        assert len(result["results"]) == 1
+        assert result["results"][0]["bug_id"] == "bug-2"
+
+    @pytest.mark.asyncio
+    async def test_smart_offset_past_results_returns_empty(
+        self, smart_search_service, mock_reranker, mock_db_connection,
+    ):
+        """Pagination past the end of results must return [] cleanly."""
+        tid = uuid4()
+        reranked = [{"bug_id": f"bug-{i}"} for i in range(3)]
+        mock_reranker.rerank = AsyncMock(return_value=(reranked, True, None))
+
+        with patch(
+            "bugspotter_intelligence.services.search_service.BugRepository.search",
+            new_callable=AsyncMock,
+            return_value=(reranked, 3),
+        ):
+            result = await smart_search_service.search_smart(
+                mock_db_connection, "q", tenant_id=tid, limit=5, offset=100
+            )
+
+        assert result["results"] == []
+
+    @pytest.mark.asyncio
+    async def test_fast_empty_query_string_does_not_crash(
+        self, search_service, mock_embedding_provider, mock_db_connection,
+    ):
+        """Empty string is a valid argument shape — let the embedding provider
+        and repo handle it; service must not pre-validate or crash."""
+        tid = uuid4()
+
+        with patch(
+            "bugspotter_intelligence.services.search_service.BugRepository.search",
+            new_callable=AsyncMock,
+            return_value=([], 0),
+        ):
+            result = await search_service.search_fast(
+                mock_db_connection, "", tenant_id=tid
+            )
+
+        assert result["query"] == ""
+        assert result["results"] == []
+        # Embedding still attempted; the provider decides whether to error.
+        mock_embedding_provider.embed.assert_called_once_with("")

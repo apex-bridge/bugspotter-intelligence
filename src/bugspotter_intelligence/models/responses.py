@@ -19,7 +19,7 @@ class AskResponse(BaseModel):
     model: str = Field(..., description="Model used (e.g., 'llama3.1:8b')")
 
     event_id: Optional[UUID] = Field(
-        None, description="intelligence_event id; pass to /v1/intelligence/feedback"
+        None, description="intelligence_event id; pass to /api/v1/intelligence/feedback"
     )
 
 
@@ -80,7 +80,7 @@ class EnrichBugResponse(BaseModel):
     affected_components: list[str]
     confidence: EnrichmentConfidence
     event_id: Optional[UUID] = Field(
-        None, description="intelligence_event id; pass to /v1/intelligence/feedback"
+        None, description="intelligence_event id; pass to /api/v1/intelligence/feedback"
     )
 
 
@@ -206,12 +206,12 @@ class ParseNLRuleResponse(BaseModel):
     )
     model: str = Field(..., description="LLM model that produced the parse")
     event_id: Optional[UUID] = Field(
-        None, description="intelligence_event id; pass to /v1/intelligence/feedback"
+        None, description="intelligence_event id; pass to /api/v1/intelligence/feedback"
     )
 
 
 class SubmitFeedbackResponse(BaseModel):
-    """Response from POST /v1/intelligence/feedback."""
+    """Response from POST /api/v1/intelligence/feedback."""
 
     feedback_id: UUID
 
