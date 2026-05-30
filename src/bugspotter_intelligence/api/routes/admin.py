@@ -1,8 +1,10 @@
 """Admin API endpoints for key management and system stats"""
 
+from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from psycopg import AsyncConnection
 
 from bugspotter_intelligence.api.deps import get_cache
@@ -20,6 +22,11 @@ from bugspotter_intelligence.models.responses import (
     APIKeyResponse,
     CacheStatsResponse,
     CreateAPIKeyResponse,
+    ObservabilityAccuracyResponse,
+    ObservabilityEvent,
+    ObservabilityEventsResponse,
+    ObservabilityOpStat,
+    ObservabilitySummaryResponse,
 )
 from bugspotter_intelligence.rate_limiting import check_rate_limit_admin
 
@@ -181,3 +188,198 @@ async def get_cache_stats(
     """
     stats = await cache.get_stats()
     return CacheStatsResponse(**stats)
+
+
+def _build_time_window(
+    where: list[str],
+    params: list,
+    from_ts: datetime | None,
+    to_ts: datetime | None,
+) -> None:
+    if from_ts is not None:
+        where.append("created_at >= %s")
+        params.append(from_ts)
+    if to_ts is not None:
+        where.append("created_at <= %s")
+        params.append(to_ts)
+
+
+@router.get("/observability/summary", response_model=ObservabilitySummaryResponse)
+async def observability_summary(
+    tenant_id: UUID | None = Query(None, description="Scope to one tenant; omit for all"),
+    from_ts: datetime | None = Query(None, alias="from"),
+    to_ts: datetime | None = Query(None, alias="to"),
+    tenant: TenantContext = Depends(check_rate_limit_admin),
+    conn: AsyncConnection = Depends(get_db_connection),
+) -> ObservabilitySummaryResponse:
+    """Aggregated stats over intelligence_event in a time window."""
+    where: list[str] = []
+    params: list = []
+    if tenant_id is not None:
+        where.append("tenant_id = %s")
+        params.append(tenant_id)
+    _build_time_window(where, params, from_ts, to_ts)
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+
+    async with conn.cursor() as cur:
+        await cur.execute(
+            f"""
+            SELECT
+                COUNT(*) AS calls,
+                COALESCE(SUM(cost_micros_usd), 0) AS cost_micros,
+                percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms)::float AS p50,
+                percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms)::float AS p95,
+                COUNT(*) FILTER (WHERE status = 'error') AS errors
+            FROM intelligence_event
+            {where_sql}
+            """,
+            params,
+        )
+        row = await cur.fetchone()
+        calls, cost_micros, p50, p95, errors = row
+
+        await cur.execute(
+            f"""
+            SELECT
+                operation,
+                COUNT(*) AS calls,
+                percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms)::float AS p50,
+                percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms)::float AS p95,
+                COALESCE(SUM(cost_micros_usd), 0) AS cost_micros
+            FROM intelligence_event
+            {where_sql}
+            GROUP BY operation
+            ORDER BY calls DESC
+            """,
+            params,
+        )
+        by_op_rows = await cur.fetchall()
+
+    by_operation = [
+        ObservabilityOpStat(
+            operation=r[0], calls=r[1], p50_ms=r[2], p95_ms=r[3], cost_micros_usd=r[4],
+        )
+        for r in by_op_rows
+    ]
+    error_rate = (errors / calls) if calls else 0.0
+
+    return ObservabilitySummaryResponse(
+        tenant_id=tenant_id,
+        from_ts=from_ts,
+        to_ts=to_ts,
+        calls=calls,
+        cost_micros_usd=cost_micros,
+        p50_ms=p50,
+        p95_ms=p95,
+        error_rate=error_rate,
+        by_operation=by_operation,
+    )
+
+
+@router.get("/observability/events", response_model=ObservabilityEventsResponse)
+async def observability_events(
+    tenant_id: UUID | None = Query(None),
+    operation: str | None = Query(None),
+    event_status: Literal["ok", "error"] | None = Query(None, alias="status"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    tenant: TenantContext = Depends(check_rate_limit_admin),
+    conn: AsyncConnection = Depends(get_db_connection),
+) -> ObservabilityEventsResponse:
+    """Recent intelligence_event rows, newest first; for ad-hoc debugging."""
+    where: list[str] = []
+    params: list = []
+    if tenant_id is not None:
+        where.append("tenant_id = %s")
+        params.append(tenant_id)
+    if operation is not None:
+        where.append("operation = %s")
+        params.append(operation)
+    if event_status is not None:
+        where.append("status = %s")
+        params.append(event_status)
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    params_with_pagination = params + [limit, offset]
+
+    async with conn.cursor() as cur:
+        await cur.execute(
+            f"""
+            SELECT id, tenant_id, operation, bug_id, provider, model, prompt_version,
+                   tokens_in, tokens_out, cost_micros_usd, latency_ms,
+                   confidence, status, error_kind, cached, created_at
+            FROM intelligence_event
+            {where_sql}
+            ORDER BY created_at DESC
+            LIMIT %s OFFSET %s
+            """,
+            params_with_pagination,
+        )
+        rows = await cur.fetchall()
+
+    events = [
+        ObservabilityEvent(
+            id=r[0], tenant_id=r[1], operation=r[2], bug_id=r[3],
+            provider=r[4], model=r[5], prompt_version=r[6],
+            tokens_in=r[7], tokens_out=r[8], cost_micros_usd=r[9],
+            latency_ms=r[10], confidence=r[11], status=r[12],
+            error_kind=r[13], cached=r[14], created_at=r[15],
+        )
+        for r in rows
+    ]
+    return ObservabilityEventsResponse(events=events, limit=limit, offset=offset)
+
+
+@router.get("/observability/accuracy", response_model=ObservabilityAccuracyResponse)
+async def observability_accuracy(
+    tenant_id: UUID | None = Query(None),
+    operation: str | None = Query(None),
+    from_ts: datetime | None = Query(None, alias="from"),
+    to_ts: datetime | None = Query(None, alias="to"),
+    tenant: TenantContext = Depends(check_rate_limit_admin),
+    conn: AsyncConnection = Depends(get_db_connection),
+) -> ObservabilityAccuracyResponse:
+    """Verdict counts and precision over intelligence_feedback joined with intelligence_event."""
+    where: list[str] = []
+    params: list = []
+    if tenant_id is not None:
+        where.append("f.tenant_id = %s")
+        params.append(tenant_id)
+    if operation is not None:
+        where.append("e.operation = %s")
+        params.append(operation)
+    if from_ts is not None:
+        where.append("f.created_at >= %s")
+        params.append(from_ts)
+    if to_ts is not None:
+        where.append("f.created_at <= %s")
+        params.append(to_ts)
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+
+    async with conn.cursor() as cur:
+        await cur.execute(
+            f"""
+            SELECT
+                COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE f.verdict = 'correct') AS correct,
+                COUNT(*) FILTER (WHERE f.verdict = 'incorrect') AS incorrect,
+                COUNT(*) FILTER (WHERE f.verdict = 'partial') AS partial
+            FROM intelligence_feedback f
+            JOIN intelligence_event e ON e.id = f.event_id
+            {where_sql}
+            """,
+            params,
+        )
+        total, correct, incorrect, partial = await cur.fetchone()
+
+    denom = correct + incorrect
+    precision = (correct / denom) if denom > 0 else None
+
+    return ObservabilityAccuracyResponse(
+        tenant_id=tenant_id,
+        operation=operation,
+        feedback_count=total,
+        correct=correct,
+        incorrect=incorrect,
+        partial=partial,
+        precision=precision,
+    )

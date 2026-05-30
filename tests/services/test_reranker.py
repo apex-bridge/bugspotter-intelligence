@@ -62,7 +62,7 @@ class TestRerank:
         # LLM scores: [0.9, 0.3, 0.7] → order should be bug-001, bug-003, bug-002
         mock_llm.generate = AsyncMock(return_value="[0.9, 0.3, 0.7]")
 
-        results, llm_used = await reranker.rerank(
+        results, llm_used, _ = await reranker.rerank(
             "login crash", sample_candidates, return_limit=3
         )
 
@@ -79,7 +79,7 @@ class TestRerank:
         """Should replace similarity scores with LLM-assigned scores"""
         mock_llm.generate = AsyncMock(return_value="[0.95, 0.2, 0.6]")
 
-        results, _ = await reranker.rerank(
+        results, _, _ = await reranker.rerank(
             "login crash", sample_candidates, return_limit=3
         )
 
@@ -92,7 +92,7 @@ class TestRerank:
         """Should return only return_limit results"""
         mock_llm.generate = AsyncMock(return_value="[0.9, 0.3, 0.7]")
 
-        results, llm_used = await reranker.rerank(
+        results, llm_used, _ = await reranker.rerank(
             "login crash", sample_candidates, return_limit=2
         )
 
@@ -110,7 +110,7 @@ class TestRerank:
         mock_llm.generate = slow_generate
         reranker = LLMReranker(mock_llm, timeout_seconds=0.1)
 
-        results, llm_used = await reranker.rerank(
+        results, llm_used, _ = await reranker.rerank(
             "login crash", sample_candidates, return_limit=3
         )
 
@@ -127,7 +127,7 @@ class TestRerank:
         """Should fall back to original ordering on LLM error"""
         mock_llm.generate = AsyncMock(side_effect=Exception("LLM unavailable"))
 
-        results, llm_used = await reranker.rerank(
+        results, llm_used, _ = await reranker.rerank(
             "login crash", sample_candidates, return_limit=3
         )
 
@@ -137,7 +137,7 @@ class TestRerank:
     @pytest.mark.asyncio
     async def test_empty_candidates(self, reranker):
         """Should handle empty candidates list"""
-        results, llm_used = await reranker.rerank("query", [], return_limit=5)
+        results, llm_used, _ = await reranker.rerank("query", [], return_limit=5)
 
         assert results == []
         assert llm_used is True

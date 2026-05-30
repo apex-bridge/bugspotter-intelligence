@@ -46,4 +46,5 @@ async def search_bugs(
         mode=result["mode"],
         query=result["query"],
         cached=result["cached"],
+        event_id=result.get("event_id"),
     )

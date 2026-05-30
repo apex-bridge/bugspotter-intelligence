@@ -282,7 +282,7 @@ class TestSearchSmart:
     ):
         """Should fetch smart_candidate_limit candidates for reranking"""
         tid = uuid4()
-        mock_reranker.rerank = AsyncMock(return_value=([], True))
+        mock_reranker.rerank = AsyncMock(return_value=([], True, None))
 
         with patch(
             "bugspotter_intelligence.services.search_service.BugRepository.search",
@@ -303,7 +303,7 @@ class TestSearchSmart:
     ):
         """Should fetch enough candidates to cover offset + limit when it exceeds smart_candidate_limit"""
         tid = uuid4()
-        mock_reranker.rerank = AsyncMock(return_value=([], True))
+        mock_reranker.rerank = AsyncMock(return_value=([], True, None))
 
         with patch(
             "bugspotter_intelligence.services.search_service.BugRepository.search",
@@ -329,7 +329,7 @@ class TestSearchSmart:
     ):
         """Should pass fast search results to the reranker"""
         tid = uuid4()
-        mock_reranker.rerank = AsyncMock(return_value=(sample_search_results, True))
+        mock_reranker.rerank = AsyncMock(return_value=(sample_search_results, True, None))
 
         with patch(
             "bugspotter_intelligence.services.search_service.BugRepository.search",
@@ -351,7 +351,7 @@ class TestSearchSmart:
     ):
         """Should report mode=smart when LLM reranking succeeded"""
         tid = uuid4()
-        mock_reranker.rerank = AsyncMock(return_value=([], True))
+        mock_reranker.rerank = AsyncMock(return_value=([], True, None))
 
         with patch(
             "bugspotter_intelligence.services.search_service.BugRepository.search",
@@ -370,7 +370,7 @@ class TestSearchSmart:
     ):
         """Should report mode=fast when LLM reranking fell back"""
         tid = uuid4()
-        mock_reranker.rerank = AsyncMock(return_value=([], False))
+        mock_reranker.rerank = AsyncMock(return_value=([], False, None))
 
         with patch(
             "bugspotter_intelligence.services.search_service.BugRepository.search",
@@ -392,7 +392,7 @@ class TestSearchSmart:
         reranked = [
             {"bug_id": f"bug-{i}", "similarity": 0.9 - i * 0.1} for i in range(10)
         ]
-        mock_reranker.rerank = AsyncMock(return_value=(reranked, True))
+        mock_reranker.rerank = AsyncMock(return_value=(reranked, True, None))
 
         with patch(
             "bugspotter_intelligence.services.search_service.BugRepository.search",
@@ -415,7 +415,7 @@ class TestSearchSmart:
     ):
         """Should preserve the total count from the initial fast search"""
         tid = uuid4()
-        mock_reranker.rerank = AsyncMock(return_value=([], True))
+        mock_reranker.rerank = AsyncMock(return_value=([], True, None))
 
         with patch(
             "bugspotter_intelligence.services.search_service.BugRepository.search",

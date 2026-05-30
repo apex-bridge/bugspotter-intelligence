@@ -228,3 +228,16 @@ class ParseNLRuleRequest(BaseModel):
         default_factory=list,
         description="Notification email template IDs available to the tenant",
     )
+
+
+class SubmitFeedbackRequest(BaseModel):
+    """User verdict on an intelligence_event row."""
+
+    event_id: UUID = Field(..., description="Returned by the prior intelligence call")
+    verdict: Literal["correct", "incorrect", "partial"]
+    user_ref: str | None = Field(
+        default=None,
+        max_length=200,
+        description="Opaque caller-supplied user identifier; no PII validated server-side",
+    )
+    note: str | None = Field(default=None, max_length=2000)

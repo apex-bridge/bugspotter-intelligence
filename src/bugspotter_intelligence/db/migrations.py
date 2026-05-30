@@ -93,6 +93,76 @@ async def add_search_indexes(conn: AsyncConnection) -> None:
         print("✅ Search indexes created")
 
 
+async def create_intelligence_event_table(conn: AsyncConnection) -> None:
+    """Create intelligence_event table — immutable audit record per LLM call"""
+    async with conn.cursor() as cursor:
+        await cursor.execute("""
+            CREATE TABLE IF NOT EXISTS intelligence_event (
+                id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                tenant_id       UUID NOT NULL,
+                operation       TEXT NOT NULL,
+                bug_id          TEXT,
+                provider        TEXT NOT NULL,
+                model           TEXT NOT NULL,
+                prompt_version  TEXT NOT NULL,
+                tokens_in       INTEGER,
+                tokens_out      INTEGER,
+                cost_micros_usd BIGINT,
+                latency_ms      INTEGER NOT NULL,
+                confidence      REAL,
+                rationale       TEXT,
+                status          TEXT NOT NULL,
+                error_kind      TEXT,
+                cached          BOOLEAN NOT NULL DEFAULT FALSE,
+                meta            JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        await cursor.execute("""
+            CREATE INDEX IF NOT EXISTS intelligence_event_tenant_created_idx
+            ON intelligence_event(tenant_id, created_at DESC)
+        """)
+
+        await cursor.execute("""
+            CREATE INDEX IF NOT EXISTS intelligence_event_tenant_op_created_idx
+            ON intelligence_event(tenant_id, operation, created_at DESC)
+        """)
+
+        await cursor.execute("""
+            CREATE INDEX IF NOT EXISTS intelligence_event_tenant_bug_idx
+            ON intelligence_event(tenant_id, bug_id) WHERE bug_id IS NOT NULL
+        """)
+
+        await conn.commit()
+        print("✅ intelligence_event table created successfully")
+
+
+async def create_intelligence_feedback_table(conn: AsyncConnection) -> None:
+    """Create intelligence_feedback table — user verdicts on intelligence_event rows"""
+    async with conn.cursor() as cursor:
+        await cursor.execute("""
+            CREATE TABLE IF NOT EXISTS intelligence_feedback (
+                id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                event_id    UUID NOT NULL REFERENCES intelligence_event(id) ON DELETE CASCADE,
+                tenant_id   UUID NOT NULL,
+                verdict     TEXT NOT NULL,
+                user_ref    TEXT,
+                note        TEXT,
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (event_id, user_ref)
+            )
+        """)
+
+        await cursor.execute("""
+            CREATE INDEX IF NOT EXISTS intelligence_feedback_tenant_created_idx
+            ON intelligence_feedback(tenant_id, created_at DESC)
+        """)
+
+        await conn.commit()
+        print("✅ intelligence_feedback table created successfully")
+
+
 async def create_tables(conn: AsyncConnection) -> None:
     """
     Create all required tables
@@ -188,3 +258,7 @@ async def create_tables(conn: AsyncConnection) -> None:
 
     # Add search indexes
     await add_search_indexes(conn)
+
+    # AI observability tables (Sprint 1)
+    await create_intelligence_event_table(conn)
+    await create_intelligence_feedback_table(conn)

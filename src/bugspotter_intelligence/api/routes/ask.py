@@ -6,9 +6,12 @@ from bugspotter_intelligence.auth import TenantContext
 from bugspotter_intelligence.config import Settings
 from bugspotter_intelligence.llm import LLMProvider
 from bugspotter_intelligence.models import AskRequest, AskResponse
+from bugspotter_intelligence.observability import CallContext, record_generate
 from bugspotter_intelligence.rate_limiting import check_rate_limit
 
 router = APIRouter(prefix="/ask", tags=["Q&A"])
+
+_ASK_PROMPT_VERSION = "ask.v1"
 
 
 @router.post("", response_model=AskResponse)
@@ -25,15 +28,28 @@ async def ask_question(
     - Spring: @PostMapping("/ask")
     - ASP.NET: [HttpPost("ask")]
     """
-    answer = await provider.generate(
-        prompt=body.question,
+    ctx = CallContext(
+        tenant_id=tenant.tenant_id,
+        operation="ask",
+        prompt_version=_ASK_PROMPT_VERSION,
+        meta={
+            "context_size": len(body.context) if body.context else 0,
+            "temperature": body.temperature,
+            "max_tokens": body.max_tokens,
+        },
+    )
+    answer, event_id = await record_generate(
+        provider,
+        body.question,
+        ctx=ctx,
         context=body.context,
         temperature=body.temperature,
-        max_tokens=body.max_tokens
+        max_tokens=body.max_tokens,
     )
 
     return AskResponse(
         answer=answer,
         provider=settings.llm_provider,
-        model=getattr(settings, f"{settings.llm_provider}_model")
+        model=getattr(settings, f"{settings.llm_provider}_model"),
+        event_id=event_id,
     )

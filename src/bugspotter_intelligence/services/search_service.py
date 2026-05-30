@@ -80,6 +80,7 @@ class SearchService:
         )
         if cached is not None:
             cached["cached"] = True
+            cached["event_id"] = None
             return cached
 
         embedding = await asyncio.to_thread(self.embedding_provider.embed, query)
@@ -166,6 +167,7 @@ class SearchService:
         )
         if cached is not None:
             cached["cached"] = True
+            cached["event_id"] = None
             return cached
 
         # Fetch enough candidates to cover pagination
@@ -187,8 +189,8 @@ class SearchService:
         )
 
         # Rerank candidates
-        reranked, llm_used = await self.reranker.rerank(
-            query, candidates, return_limit=offset + limit
+        reranked, llm_used, event_id = await self.reranker.rerank(
+            query, candidates, return_limit=offset + limit, tenant_id=tenant_id,
         )
 
         # Apply pagination to reranked results
@@ -202,6 +204,7 @@ class SearchService:
             "mode": "smart" if llm_used else "fast",
             "query": query,
             "cached": False,
+            "event_id": str(event_id) if event_id else None,
         }
 
         # Only cache if LLM was actually used (not a fallback)

@@ -40,6 +40,7 @@ async def parse_nl_rule(
         available_integrations=body.available_integrations,
         available_slack_channels=body.available_slack_channels,
         available_email_templates=body.available_email_templates,
+        tenant_id=tenant.tenant_id,
     )
 
     # Resolve the model identifier (e.g. "llama3.2:3b") for the response.
@@ -59,4 +60,5 @@ async def parse_nl_rule(
         clarifications=result.clarifications,
         raw_llm_output=result.raw_llm_output,
         model=model,
+        event_id=result.event_id,
     )
