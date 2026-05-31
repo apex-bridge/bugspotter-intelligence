@@ -188,10 +188,21 @@ class SearchService:
             date_to=date_to,
         )
 
-        # Rerank candidates
-        reranked, llm_used, event_id = await self.reranker.rerank(
-            query, candidates, return_limit=offset + limit, tenant_id=tenant_id,
-        )
+        # Rerank candidates. The docstring promises a fast-mode fallback
+        # when the reranker fails, not just when it's None — a flaky LLM
+        # backend (timeout, rate limit, JSON parse error) must NOT break
+        # the search endpoint. On exception, treat the ANN-ordered
+        # candidates as the fast-mode result: llm_used=False propagates
+        # to mode="fast" and disables caching under the smart key.
+        try:
+            reranked, llm_used, event_id = await self.reranker.rerank(
+                query, candidates, return_limit=offset + limit, tenant_id=tenant_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Reranker raised, falling back to fast results: %s", exc
+            )
+            reranked, llm_used, event_id = candidates, False, None
 
         # Apply pagination to reranked results
         paginated = reranked[offset : offset + limit]
@@ -234,16 +245,23 @@ class SearchService:
         date_from: Optional[datetime],
         date_to: Optional[datetime],
     ) -> Optional[dict]:
-        """Check cache for search results."""
+        """Check cache for search results. Soft-fails on any cache error so
+        a flaky backend (Redis blip, connection reset) doesn't break the
+        request — caller treats a None return as a miss and queries the DB."""
         if self.cache is None:
             return None
 
-        token = await self.cache.get_tenant_version(tenant_id)
-        filters = self._build_filter_dict(status, date_from, date_to, limit, offset)
-        query_hash = CacheKeyBuilder.hash_query(query, filters)
-        key = CacheKeyBuilder.search_key(tenant_id, query_hash, mode, token)
-
-        return await self.cache.get(key)
+        try:
+            token = await self.cache.get_tenant_version(tenant_id)
+            filters = self._build_filter_dict(
+                status, date_from, date_to, limit, offset
+            )
+            query_hash = CacheKeyBuilder.hash_query(query, filters)
+            key = CacheKeyBuilder.search_key(tenant_id, query_hash, mode, token)
+            return await self.cache.get(key)
+        except Exception as exc:
+            logger.warning("Cache get failed, proceeding without cache: %s", exc)
+            return None
 
     async def _cache_set(
         self,
@@ -257,32 +275,39 @@ class SearchService:
         date_to: Optional[datetime],
         result: dict,
     ) -> None:
-        """Store search results in cache."""
+        """Store search results in cache. Soft-fails on any cache error —
+        the request has already been served from the DB and must succeed
+        regardless of whether the write lands."""
         if self.cache is None:
             return
 
-        token = await self.cache.get_tenant_version(tenant_id)
-        filters = self._build_filter_dict(status, date_from, date_to, limit, offset)
-        query_hash = CacheKeyBuilder.hash_query(query, filters)
-        key = CacheKeyBuilder.search_key(tenant_id, query_hash, mode, token)
+        try:
+            token = await self.cache.get_tenant_version(tenant_id)
+            filters = self._build_filter_dict(
+                status, date_from, date_to, limit, offset
+            )
+            query_hash = CacheKeyBuilder.hash_query(query, filters)
+            key = CacheKeyBuilder.search_key(tenant_id, query_hash, mode, token)
 
-        ttl = self.cache_ttl_smart if mode == "smart" else self.cache_ttl_fast
+            ttl = self.cache_ttl_smart if mode == "smart" else self.cache_ttl_fast
 
-        # Convert datetime objects for JSON serialization
-        serializable = result.copy()
-        serializable["results"] = [
-            {
-                **r,
-                "created_at": (
-                    r["created_at"].isoformat()
-                    if isinstance(r.get("created_at"), datetime)
-                    else r.get("created_at")
-                ),
-            }
-            for r in result["results"]
-        ]
+            # Convert datetime objects for JSON serialization
+            serializable = result.copy()
+            serializable["results"] = [
+                {
+                    **r,
+                    "created_at": (
+                        r["created_at"].isoformat()
+                        if isinstance(r.get("created_at"), datetime)
+                        else r.get("created_at")
+                    ),
+                }
+                for r in result["results"]
+            ]
 
-        await self.cache.set(key, serializable, ttl_seconds=ttl)
+            await self.cache.set(key, serializable, ttl_seconds=ttl)
+        except Exception as exc:
+            logger.warning("Cache set failed, dropping write: %s", exc)
 
     @staticmethod
     def _build_filter_dict(
