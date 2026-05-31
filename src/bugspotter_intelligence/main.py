@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from bugspotter_intelligence.api.routes import admin, ask, bugs, rules, search
+from bugspotter_intelligence.api.routes import admin, ask, bugs, intelligence, rules, search
 from bugspotter_intelligence.config import Settings
 from bugspotter_intelligence.db.database import close_db, get_pool, init_db
 from bugspotter_intelligence.db.migrations import create_tables
@@ -64,6 +64,7 @@ def register_routes(app: FastAPI) -> None:
     app.include_router(bugs.router, prefix=API_PREFIX)
     app.include_router(search.router, prefix=API_PREFIX)
     app.include_router(rules.router, prefix=API_PREFIX)
+    app.include_router(intelligence.router, prefix=API_PREFIX)
     app.include_router(admin.router, prefix=API_PREFIX)
 
 

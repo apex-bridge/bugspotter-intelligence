@@ -3,10 +3,14 @@
 import asyncio
 import json
 import logging
+from uuid import UUID
 
 from bugspotter_intelligence.llm import LLMProvider
+from bugspotter_intelligence.observability import CallContext, record_generate
 
 logger = logging.getLogger(__name__)
+
+_RERANK_PROMPT_VERSION = "search_rerank.v1"
 
 _RERANK_PROMPT_TEMPLATE = """Score each bug report's relevance to the search query on a scale of 0.0 (completely irrelevant) to 1.0 (perfect match).
 
@@ -35,33 +39,50 @@ class LLMReranker:
         query: str,
         candidates: list[dict],
         return_limit: int = 5,
-    ) -> tuple[list[dict], bool]:
+        *,
+        tenant_id: UUID | None = None,
+    ) -> tuple[list[dict], bool, UUID | None]:
         """
         Rerank candidates using LLM relevance scoring.
 
-        Args:
-            query: Original search query
-            candidates: List of result dicts from fast search
-            return_limit: Number of results to return after reranking
-
         Returns:
-            Tuple of (reranked results, llm_used flag).
-            llm_used is False if fallback to original ordering was used.
+            (reranked results, llm_used flag, intelligence_event id).
+            llm_used is False on fallback; event_id is None when tenant_id
+            wasn't provided or persistence failed.
         """
         if not candidates:
-            return [], True
+            return [], True, None
 
         prompt = self._build_prompt(query, candidates)
+        event_id: UUID | None = None
 
         try:
-            raw_response = await asyncio.wait_for(
-                self.llm_provider.generate(
-                    prompt=prompt,
-                    temperature=0.0,
-                    max_tokens=200,
-                ),
-                timeout=self.timeout_seconds,
-            )
+            if tenant_id is None:
+                # No-observability path (tests / callers without a tenant context):
+                # keep an outer asyncio.wait_for to enforce the timeout.
+                raw_response = await asyncio.wait_for(
+                    self.llm_provider.generate(
+                        prompt=prompt, temperature=0.0, max_tokens=200,
+                    ),
+                    timeout=self.timeout_seconds,
+                )
+            else:
+                ctx = CallContext(
+                    tenant_id=tenant_id,
+                    operation="search_rerank",
+                    prompt_version=_RERANK_PROMPT_VERSION,
+                    meta={
+                        "candidate_count": len(candidates),
+                        "return_limit": return_limit,
+                    },
+                )
+                # Pass timeout to the recorder so it runs in the same task as
+                # _persist_event — outer wait_for here would cancel persistence.
+                raw_response, event_id = await record_generate(
+                    self.llm_provider, prompt, ctx=ctx,
+                    temperature=0.0, max_tokens=200,
+                    timeout=self.timeout_seconds,
+                )
 
             scores = self._parse_scores(raw_response, len(candidates))
 
@@ -74,20 +95,24 @@ class LLMReranker:
                 result["similarity"] = score
                 reranked.append(result)
 
-            return reranked, True
+            return reranked, True, event_id
 
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as e:
             logger.warning(
                 f"LLM reranking timed out after {self.timeout_seconds}s, "
                 "falling back to original ordering"
             )
-            return candidates[:return_limit], False
+            # Prefer the locally-bound event_id: record_generate may have
+            # succeeded and returned an id, then a downstream step (e.g.
+            # _parse_scores) threw. Falling back to exception-attached id only
+            # if the local one was never assigned.
+            return candidates[:return_limit], False, event_id or getattr(e, "event_id", None)
 
         except Exception as e:
             logger.warning(
                 f"LLM reranking failed: {e}, falling back to original ordering"
             )
-            return candidates[:return_limit], False
+            return candidates[:return_limit], False, event_id or getattr(e, "event_id", None)
 
     def _build_prompt(self, query: str, candidates: list[dict]) -> str:
         """Build the scoring prompt for the LLM."""

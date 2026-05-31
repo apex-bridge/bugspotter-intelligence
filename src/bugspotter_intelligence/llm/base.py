@@ -1,5 +1,14 @@
 from abc import ABC, abstractmethod
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Any, Optional
+
+
+@dataclass
+class Usage:
+    """Token counts and provider extras from one LLM call; None = unknown, not zero."""
+    input: Optional[int] = None
+    output: Optional[int] = None
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 class LLMProvider(ABC):
@@ -30,6 +39,17 @@ class LLMProvider(ABC):
             Generated text response
         """
         pass
+
+    async def generate_with_usage(
+            self,
+            prompt: str,
+            context: Optional[list[str]] = None,
+            temperature: float = 0.7,
+            max_tokens: int = 1000,
+    ) -> tuple[str, Usage]:
+        """Like generate(), but also returns token usage; default returns empty Usage."""
+        text = await self.generate(prompt, context, temperature, max_tokens)
+        return text, Usage()
 
     def _build_context_prompt(self, prompt: str, context: Optional[list[str]] = None) -> str:
         """

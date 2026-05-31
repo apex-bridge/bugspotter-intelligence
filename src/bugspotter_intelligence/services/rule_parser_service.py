@@ -28,12 +28,17 @@ from __future__ import annotations
 import json
 import logging
 
+from uuid import UUID
+
 from pydantic import ValidationError
 
 from ..llm.base import LLMProvider
 from ..models.dedup_rule import DedupRule
+from ..observability import CallContext, record_generate
 
 logger = logging.getLogger(__name__)
+
+_RULE_PARSE_PROMPT_VERSION = "rule_parse.v1"
 
 
 # ============================================================================
@@ -312,7 +317,7 @@ class RuleParserResult:
     public `ParseNLRuleResponse` model.
     """
 
-    __slots__ = ("draft", "errors", "clarifications", "raw_llm_output")
+    __slots__ = ("draft", "errors", "clarifications", "raw_llm_output", "event_id")
 
     def __init__(
         self,
@@ -320,11 +325,13 @@ class RuleParserResult:
         errors: list[str],
         clarifications: list[str],
         raw_llm_output: str,
+        event_id: UUID | None = None,
     ) -> None:
         self.draft = draft
         self.errors = errors
         self.clarifications = clarifications
         self.raw_llm_output = raw_llm_output
+        self.event_id = event_id
 
 
 class RuleParserService:
@@ -339,6 +346,8 @@ class RuleParserService:
         available_integrations: list[str] | None = None,
         available_slack_channels: list[str] | None = None,
         available_email_templates: list[str] | None = None,
+        *,
+        tenant_id: UUID | None = None,
     ) -> RuleParserResult:
         prompt = build_prompt(
             nl_input=nl,
@@ -347,22 +356,36 @@ class RuleParserService:
             available_email_templates=available_email_templates or [],
         )
 
+        event_id: UUID | None = None
         # Low temperature: we want schema adherence, not creativity.
         # Wrap the LLM call so a provider outage / timeout produces a
         # structured parser error rather than bubbling a 500 up to the
         # admin UI. The exception details are logged but not surfaced —
         # they can include backend URLs / auth headers in some clients.
         try:
-            raw = await self.llm.generate(
-                prompt=prompt,
-                temperature=0.1,
+            if tenant_id is not None:
+                ctx = CallContext(
+                    tenant_id=tenant_id,
+                    operation="rule_parse",
+                    prompt_version=_RULE_PARSE_PROMPT_VERSION,
+                    meta={
+                        "available_integrations_count": len(available_integrations or []),
+                        "available_slack_channels_count": len(available_slack_channels or []),
+                        "available_email_templates_count": len(available_email_templates or []),
+                    },
+                )
                 # A complex rule with multiple conditions / actions plus
                 # the wrapping envelope can easily reach ~1200 output
-                # tokens — 800 truncated mid-JSON for the long-tail
-                # cases. 1500 is a generous ceiling without putting any
+                # tokens — 1500 is a generous ceiling without putting any
                 # noticeable cost into the typical short-rule path.
-                max_tokens=1500,
-            )
+                raw, event_id = await record_generate(
+                    self.llm, prompt, ctx=ctx,
+                    temperature=0.1, max_tokens=1500,
+                )
+            else:
+                raw = await self.llm.generate(
+                    prompt=prompt, temperature=0.1, max_tokens=1500,
+                )
         except Exception as exc:
             # `logger.exception` would dump the full traceback; some HTTP
             # client libs surface response bodies that include
@@ -380,6 +403,7 @@ class RuleParserService:
                 errors=["Failed to generate a rule draft. Please retry."],
                 clarifications=[],
                 raw_llm_output="",
+                event_id=event_id,
             )
 
         # Defensive empty / None / whitespace-only check: `_extract_json_object`
@@ -394,6 +418,7 @@ class RuleParserService:
                 errors=["LLM returned an empty response. Please retry."],
                 clarifications=[],
                 raw_llm_output="",
+                event_id=event_id,
             )
 
         envelope = _extract_json_object(raw)
@@ -403,6 +428,7 @@ class RuleParserService:
                 errors=["LLM did not return a parseable JSON envelope."],
                 clarifications=[],
                 raw_llm_output=raw,
+                event_id=event_id,
             )
 
         errors_from_llm = _to_str_list(envelope.get("errors"))
@@ -417,6 +443,7 @@ class RuleParserService:
                 or ["LLM declined to produce a rule but gave no explanation."],
                 clarifications=clarifications_from_llm,
                 raw_llm_output=raw,
+                event_id=event_id,
             )
 
         # Validate the structured draft against the Pydantic schema
@@ -445,6 +472,7 @@ class RuleParserService:
                 errors=_friendly_validation_errors(ve),
                 clarifications=clarifications_from_llm,
                 raw_llm_output=raw,
+                event_id=event_id,
             )
 
         return RuleParserResult(
@@ -452,6 +480,7 @@ class RuleParserService:
             errors=errors_from_llm,
             clarifications=clarifications_from_llm,
             raw_llm_output=raw,
+            event_id=event_id,
         )
 
 

@@ -18,6 +18,10 @@ class AskResponse(BaseModel):
 
     model: str = Field(..., description="Model used (e.g., 'llama3.1:8b')")
 
+    event_id: Optional[UUID] = Field(
+        None, description="intelligence_event id; pass to /api/v1/intelligence/feedback"
+    )
+
 
 class SimilarBug(BaseModel):
     """Model for a similar bug in search results"""
@@ -75,6 +79,9 @@ class EnrichBugResponse(BaseModel):
     root_cause_summary: str
     affected_components: list[str]
     confidence: EnrichmentConfidence
+    event_id: Optional[UUID] = Field(
+        None, description="intelligence_event id; pass to /api/v1/intelligence/feedback"
+    )
 
 
 class BugDetailResponse(BaseModel):
@@ -164,6 +171,13 @@ class SearchResponse(BaseModel):
     mode: Literal["fast", "smart"]
     query: str
     cached: bool = False
+    event_id: Optional[UUID] = Field(
+        None, description="intelligence_event id for the rerank LLM call (smart mode only)"
+    )
+    confidence: Optional[float] = Field(
+        None, ge=0.0, le=1.0,
+        description="Overall confidence in the ranking (smart mode only)"
+    )
 
 
 class ParseNLRuleResponse(BaseModel):
@@ -191,6 +205,77 @@ class ParseNLRuleResponse(BaseModel):
         None, description="Raw LLM text — exposed for debugging, not for UI"
     )
     model: str = Field(..., description="LLM model that produced the parse")
+    event_id: Optional[UUID] = Field(
+        None, description="intelligence_event id; pass to /api/v1/intelligence/feedback"
+    )
+
+
+class SubmitFeedbackResponse(BaseModel):
+    """Response from POST /api/v1/intelligence/feedback."""
+
+    feedback_id: UUID
+
+
+class ObservabilityOpStat(BaseModel):
+    operation: str
+    calls: int
+    p50_ms: Optional[float] = None
+    p95_ms: Optional[float] = None
+    cost_micros_usd: int = 0
+
+
+class ObservabilitySummaryResponse(BaseModel):
+    """Response from GET /admin/observability/summary."""
+
+    tenant_id: Optional[UUID] = None
+    from_ts: Optional[datetime] = None
+    to_ts: Optional[datetime] = None
+    calls: int
+    cost_micros_usd: int = 0
+    p50_ms: Optional[float] = None
+    p95_ms: Optional[float] = None
+    error_rate: float = Field(..., ge=0.0, le=1.0)
+    by_operation: list[ObservabilityOpStat]
+
+
+class ObservabilityEvent(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    operation: str
+    bug_id: Optional[str] = None
+    provider: str
+    model: str
+    prompt_version: str
+    tokens_in: Optional[int] = None
+    tokens_out: Optional[int] = None
+    cost_micros_usd: Optional[int] = None
+    latency_ms: int
+    confidence: Optional[float] = None
+    status: str
+    error_kind: Optional[str] = None
+    cached: bool
+    created_at: datetime
+
+
+class ObservabilityEventsResponse(BaseModel):
+    events: list[ObservabilityEvent]
+    limit: int
+    offset: int
+
+
+class ObservabilityAccuracyResponse(BaseModel):
+    """Response from GET /admin/observability/accuracy."""
+
+    tenant_id: Optional[UUID] = None
+    operation: Optional[str] = None
+    feedback_count: int
+    correct: int
+    incorrect: int
+    partial: int
+    precision: Optional[float] = Field(
+        None, ge=0.0, le=1.0,
+        description="correct / (correct + incorrect); null when denominator is 0",
+    )
 
 
 class CacheStatsResponse(BaseModel):

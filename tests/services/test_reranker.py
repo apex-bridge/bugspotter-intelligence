@@ -62,7 +62,7 @@ class TestRerank:
         # LLM scores: [0.9, 0.3, 0.7] → order should be bug-001, bug-003, bug-002
         mock_llm.generate = AsyncMock(return_value="[0.9, 0.3, 0.7]")
 
-        results, llm_used = await reranker.rerank(
+        results, llm_used, _ = await reranker.rerank(
             "login crash", sample_candidates, return_limit=3
         )
 
@@ -79,7 +79,7 @@ class TestRerank:
         """Should replace similarity scores with LLM-assigned scores"""
         mock_llm.generate = AsyncMock(return_value="[0.95, 0.2, 0.6]")
 
-        results, _ = await reranker.rerank(
+        results, _, _ = await reranker.rerank(
             "login crash", sample_candidates, return_limit=3
         )
 
@@ -92,7 +92,7 @@ class TestRerank:
         """Should return only return_limit results"""
         mock_llm.generate = AsyncMock(return_value="[0.9, 0.3, 0.7]")
 
-        results, llm_used = await reranker.rerank(
+        results, llm_used, _ = await reranker.rerank(
             "login crash", sample_candidates, return_limit=2
         )
 
@@ -110,7 +110,7 @@ class TestRerank:
         mock_llm.generate = slow_generate
         reranker = LLMReranker(mock_llm, timeout_seconds=0.1)
 
-        results, llm_used = await reranker.rerank(
+        results, llm_used, _ = await reranker.rerank(
             "login crash", sample_candidates, return_limit=3
         )
 
@@ -127,7 +127,7 @@ class TestRerank:
         """Should fall back to original ordering on LLM error"""
         mock_llm.generate = AsyncMock(side_effect=Exception("LLM unavailable"))
 
-        results, llm_used = await reranker.rerank(
+        results, llm_used, _ = await reranker.rerank(
             "login crash", sample_candidates, return_limit=3
         )
 
@@ -137,10 +137,40 @@ class TestRerank:
     @pytest.mark.asyncio
     async def test_empty_candidates(self, reranker):
         """Should handle empty candidates list"""
-        results, llm_used = await reranker.rerank("query", [], return_limit=5)
+        results, llm_used, _ = await reranker.rerank("query", [], return_limit=5)
 
         assert results == []
         assert llm_used is True
+
+    @pytest.mark.asyncio
+    async def test_preserves_local_event_id_when_parse_fails(
+        self, mock_llm, sample_candidates
+    ):
+        """If record_generate returns a valid event_id but a later step throws
+        (e.g. _parse_scores), the fallback path must surface the locally-bound
+        event_id, not None."""
+        from uuid import uuid4 as _uuid4
+        from unittest.mock import patch as _patch
+
+        recorded_event_id = _uuid4()
+        reranker = LLMReranker(mock_llm, timeout_seconds=5.0)
+
+        # record_generate succeeded with an event_id; _parse_scores will throw.
+        async def fake_record_generate(provider, prompt, *, ctx, **kwargs):
+            return "irrelevant", recorded_event_id
+
+        with _patch.object(LLMReranker, "_parse_scores", side_effect=ValueError("parse boom")):
+            with _patch(
+                "bugspotter_intelligence.services.reranker.record_generate",
+                side_effect=fake_record_generate,
+            ):
+                _, llm_used, event_id = await reranker.rerank(
+                    "q", sample_candidates, return_limit=3,
+                    tenant_id=_uuid4(),
+                )
+
+        assert llm_used is False
+        assert event_id == recorded_event_id
 
     @pytest.mark.asyncio
     async def test_prompt_includes_query(self, reranker, mock_llm, sample_candidates):
