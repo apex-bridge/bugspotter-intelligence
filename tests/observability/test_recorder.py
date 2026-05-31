@@ -258,3 +258,56 @@ async def test_cancellation_is_recorded_and_re_raised():
     params = captured[0]["params"]
     assert params[12] == "error"
     assert params[13] == "CancelledError"
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_persist_propagates_over_pending_exc():
+    """If outer cancel hits while persisting AND the provider already raised,
+    CancelledError must still propagate — not be swallowed in favor of the
+    provider error. The event loop / framework needs the cancel to land.
+    """
+    captured: list[dict] = []
+    cancel_inside = asyncio.Event()
+    cancel_acked = asyncio.Event()
+
+    cursor = MagicMock()
+    cursor.__aenter__ = AsyncMock(return_value=cursor)
+    cursor.__aexit__ = AsyncMock(return_value=None)
+
+    async def slow_execute(sql, params):
+        # Signal we're inside persist, then await an event the test will never
+        # set — emulating a real DB call that the outer cancel interrupts.
+        captured.append({"sql": sql, "params": params})
+        cancel_inside.set()
+        try:
+            await asyncio.sleep(5)
+        finally:
+            cancel_acked.set()
+
+    cursor.execute = AsyncMock(side_effect=slow_execute)
+    cursor.fetchone = AsyncMock(return_value=(uuid4(),))
+
+    conn = MagicMock()
+    conn.cursor = MagicMock(return_value=cursor)
+    conn.__aenter__ = AsyncMock(return_value=conn)
+    conn.__aexit__ = AsyncMock(return_value=None)
+    conn.commit = AsyncMock()
+
+    pool = MagicMock()
+    pool.connection = MagicMock(return_value=conn)
+
+    provider = OllamaProvider(exc=RuntimeError("provider boom"), settings=_make_settings())
+    ctx = CallContext(tenant_id=uuid4(), operation="ask", prompt_version="ask.v1")
+
+    async def runner():
+        with patch("bugspotter_intelligence.observability.recorder.get_pool", return_value=pool):
+            await record_generate(provider, "Q?", ctx=ctx)
+
+    task = asyncio.create_task(runner())
+    # Wait until persist is in-flight, then cancel.
+    await cancel_inside.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    # Sanity: the persist was actually entered (one INSERT captured).
+    assert len(captured) == 1

@@ -102,13 +102,17 @@ class LLMReranker:
                 f"LLM reranking timed out after {self.timeout_seconds}s, "
                 "falling back to original ordering"
             )
-            return candidates[:return_limit], False, getattr(e, "event_id", None)
+            # Prefer the locally-bound event_id: record_generate may have
+            # succeeded and returned an id, then a downstream step (e.g.
+            # _parse_scores) threw. Falling back to exception-attached id only
+            # if the local one was never assigned.
+            return candidates[:return_limit], False, event_id or getattr(e, "event_id", None)
 
         except Exception as e:
             logger.warning(
                 f"LLM reranking failed: {e}, falling back to original ordering"
             )
-            return candidates[:return_limit], False, getattr(e, "event_id", None)
+            return candidates[:return_limit], False, event_id or getattr(e, "event_id", None)
 
     def _build_prompt(self, query: str, candidates: list[dict]) -> str:
         """Build the scoring prompt for the LLM."""

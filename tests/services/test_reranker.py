@@ -143,6 +143,36 @@ class TestRerank:
         assert llm_used is True
 
     @pytest.mark.asyncio
+    async def test_preserves_local_event_id_when_parse_fails(
+        self, mock_llm, sample_candidates
+    ):
+        """If record_generate returns a valid event_id but a later step throws
+        (e.g. _parse_scores), the fallback path must surface the locally-bound
+        event_id, not None."""
+        from uuid import uuid4 as _uuid4
+        from unittest.mock import patch as _patch
+
+        recorded_event_id = _uuid4()
+        reranker = LLMReranker(mock_llm, timeout_seconds=5.0)
+
+        # record_generate succeeded with an event_id; _parse_scores will throw.
+        async def fake_record_generate(provider, prompt, *, ctx, **kwargs):
+            return "irrelevant", recorded_event_id
+
+        with _patch.object(LLMReranker, "_parse_scores", side_effect=ValueError("parse boom")):
+            with _patch(
+                "bugspotter_intelligence.services.reranker.record_generate",
+                side_effect=fake_record_generate,
+            ):
+                _, llm_used, event_id = await reranker.rerank(
+                    "q", sample_candidates, return_limit=3,
+                    tenant_id=_uuid4(),
+                )
+
+        assert llm_used is False
+        assert event_id == recorded_event_id
+
+    @pytest.mark.asyncio
     async def test_prompt_includes_query(self, reranker, mock_llm, sample_candidates):
         """Should include the search query in the LLM prompt"""
         mock_llm.generate = AsyncMock(return_value="[0.5, 0.5, 0.5]")

@@ -127,3 +127,20 @@ async def test_missing_response_key_wrapped_with_cause(provider):
             await provider.generate_with_usage(prompt="hi")
 
     assert isinstance(ei.value.__cause__, KeyError)
+
+
+@pytest.mark.asyncio
+async def test_non_dict_json_body_wrapped_with_cause(provider):
+    """JSON that decodes to a non-dict (list / primitive) → RuntimeError with TypeError as cause."""
+    with patch("httpx.AsyncClient") as mock_client:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = '["unexpected", "list"]'
+        mock_response.json.return_value = ["unexpected", "list"]
+        mock_post = AsyncMock(return_value=mock_response)
+        mock_client.return_value.__aenter__.return_value.post = mock_post
+
+        with pytest.raises(RuntimeError, match="Unexpected Ollama response format") as ei:
+            await provider.generate_with_usage(prompt="hi")
+
+    assert isinstance(ei.value.__cause__, TypeError)

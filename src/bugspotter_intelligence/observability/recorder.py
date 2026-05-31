@@ -129,10 +129,11 @@ async def record_generate(
             meta=meta,
         ))
     except asyncio.CancelledError:
-        # The shielded task keeps running; we just lose visibility into its id.
-        # Re-raised below if there's no pending exception already.
-        if pending_exc is None:
-            raise
+        # Cancellation must always propagate so the event loop / framework can
+        # tear the task down cleanly. The shielded persist task keeps running
+        # in the background; we just lose visibility into its row id.
+        # Any pending provider exception is dropped — cancellation wins.
+        raise
     except Exception:
         # Observability must never break the user-facing path.
         logger.exception("Failed to persist intelligence_event")

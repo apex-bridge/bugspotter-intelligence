@@ -223,8 +223,8 @@ async def observability_summary(
             SELECT
                 COUNT(*) AS calls,
                 COALESCE(SUM(cost_micros_usd), 0) AS cost_micros,
-                percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms)::float AS p50,
-                percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms)::float AS p95,
+                percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms::float) AS p50,
+                percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms::float) AS p95,
                 COUNT(*) FILTER (WHERE status = 'error') AS errors
             FROM intelligence_event
             {where_sql}
@@ -239,8 +239,8 @@ async def observability_summary(
             SELECT
                 operation,
                 COUNT(*) AS calls,
-                percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms)::float AS p50,
-                percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms)::float AS p95,
+                percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms::float) AS p50,
+                percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms::float) AS p95,
                 COALESCE(SUM(cost_micros_usd), 0) AS cost_micros
             FROM intelligence_event
             {where_sql}

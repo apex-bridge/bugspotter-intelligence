@@ -56,9 +56,11 @@ class OllamaProvider(LLMProvider):
                 raise RuntimeError(
                     f"Ollama API error: {e.response.status_code} - {e.response.text}"
                 ) from e
-            except (ValueError, KeyError) as e:
+            except (ValueError, KeyError, TypeError) as e:
                 # ValueError covers JSONDecodeError (malformed body); KeyError
-                # covers a response with missing "response" key.
+                # covers a dict without "response"; TypeError covers a JSON
+                # body that decoded to a non-dict (list / primitive) where
+                # subscript access fails.
                 raise RuntimeError(
                     f"Unexpected Ollama response format: {response.text}"
                 ) from e
