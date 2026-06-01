@@ -298,7 +298,7 @@ async def observability_events(
             f"""
             SELECT id, tenant_id, operation, bug_id, provider, model, prompt_version,
                    tokens_in, tokens_out, cost_micros_usd, latency_ms,
-                   confidence, status, error_kind, cached, created_at
+                   confidence, rationale, status, error_kind, cached, created_at
             FROM intelligence_event
             {where_sql}
             ORDER BY created_at DESC
@@ -313,8 +313,8 @@ async def observability_events(
             id=r[0], tenant_id=r[1], operation=r[2], bug_id=r[3],
             provider=r[4], model=r[5], prompt_version=r[6],
             tokens_in=r[7], tokens_out=r[8], cost_micros_usd=r[9],
-            latency_ms=r[10], confidence=r[11], status=r[12],
-            error_kind=r[13], cached=r[14], created_at=r[15],
+            latency_ms=r[10], confidence=r[11], rationale=r[12],
+            status=r[13], error_kind=r[14], cached=r[15], created_at=r[16],
         )
         for r in rows
     ]

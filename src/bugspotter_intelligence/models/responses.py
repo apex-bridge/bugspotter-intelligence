@@ -260,6 +260,7 @@ class ObservabilityEvent(BaseModel):
     cost_micros_usd: Optional[int] = None
     latency_ms: int
     confidence: Optional[float] = None
+    rationale: Optional[str] = None
     status: str
     error_kind: Optional[str] = None
     cached: bool
