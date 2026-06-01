@@ -509,8 +509,12 @@ class TestBugQueryService:
                 "bugspotter_intelligence.services.bug_query_service.record_generate",
                 side_effect=fake_record_generate,
             ),
+            # Patch the local-namespace binding (not db.database.get_pool) —
+            # the import was hoisted to the top of bug_query_service.py, so
+            # the symbol is resolved at import time and patching the source
+            # module would have no effect inside this service.
             patch(
-                "bugspotter_intelligence.db.database.get_pool",
+                "bugspotter_intelligence.services.bug_query_service.get_pool",
                 return_value=_FakePool(),
             ),
         ):
@@ -521,8 +525,9 @@ class TestBugQueryService:
                 tenant_id=tenant_id,
             )
 
-        # event_id flows back as the string-rendered UUID
-        assert result["event_id"] == str(recorded_event_id)
+        # event_id is passed through as a UUID (not stringified) — Pydantic
+        # accepts it directly on EnrichBugResponse.event_id: Optional[UUID].
+        assert result["event_id"] == recorded_event_id
         # rationale parsed and surfaced on the response
         assert result["rationale"] == (
             "Critical because every checkout submission can hit the race."

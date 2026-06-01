@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from urllib.parse import urlparse
 from uuid import UUID
@@ -7,9 +8,12 @@ from psycopg import AsyncConnection
 
 from bugspotter_intelligence.config import Settings
 from bugspotter_intelligence.db.bug_repository import BugRepository
+from bugspotter_intelligence.db.database import get_pool
 from bugspotter_intelligence.llm import LLMProvider
 from bugspotter_intelligence.observability import CallContext, record_generate
 from bugspotter_intelligence.services.embeddings import EmbeddingProvider
+
+logger = logging.getLogger(__name__)
 
 _ENRICH_PROMPT_VERSION = "enrich.v1"
 _MAX_RATIONALE_CHARS = 4096
@@ -332,7 +336,10 @@ Return this exact JSON structure:
         if event_id is not None and parsed.get("rationale"):
             await self._attach_rationale_to_event(event_id, parsed["rationale"])
 
-        parsed["event_id"] = str(event_id) if event_id else None
+        # Pass the UUID through directly — Pydantic handles UUID natively on
+        # EnrichBugResponse.event_id (Optional[UUID]) and serializes to a
+        # JSON string at the wire. Stringifying here would just round-trip.
+        parsed["event_id"] = event_id
         return parsed
 
     async def _attach_rationale_to_event(self, event_id: UUID, rationale: str) -> None:
@@ -343,9 +350,6 @@ Return this exact JSON structure:
         # Cap at the same 4 KiB the recorder caps for direct-passed rationales.
         if len(rationale) > _MAX_RATIONALE_CHARS:
             rationale = rationale[:_MAX_RATIONALE_CHARS]
-        from bugspotter_intelligence.db.database import get_pool
-        import logging
-        logger = logging.getLogger(__name__)
         try:
             pool = get_pool()
             async with pool.connection() as conn:
