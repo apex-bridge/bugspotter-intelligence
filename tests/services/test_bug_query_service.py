@@ -361,3 +361,184 @@ class TestBugQueryService:
                         "root_cause": "x", "components": [], "tags": []}),
         )
         assert result["suggested_severity"] == "medium"
+
+    # ========================================================================
+    # rationale capture (Sprint 2 #3)
+    # ========================================================================
+
+    def test_parse_extracts_rationale_when_present(self, query_service):
+        result = query_service._parse_enrichment_response(
+            "bug-1",
+            json.dumps({
+                "category": "crash",
+                "severity": "high",
+                "root_cause": "NPE in payment processor",
+                "components": [],
+                "tags": [],
+                "rationale": "Marked high because payment-path crash blocks checkout.",
+            }),
+        )
+        assert result["rationale"] == "Marked high because payment-path crash blocks checkout."
+
+    def test_parse_rationale_is_none_when_missing(self, query_service):
+        """Older prompts or partial models may omit rationale — must not fail."""
+        result = query_service._parse_enrichment_response(
+            "bug-1",
+            json.dumps({
+                "category": "ui", "severity": "low", "root_cause": "x",
+                "components": [], "tags": [],
+            }),
+        )
+        assert result["rationale"] is None
+
+    def test_parse_rationale_strips_placeholder(self, query_service):
+        """LLMs that echo the placeholder template (`<one short...>`) must
+        not have that surface as the displayed rationale."""
+        result = query_service._parse_enrichment_response(
+            "bug-1",
+            json.dumps({
+                "category": "ui", "severity": "low", "root_cause": "x",
+                "components": [], "tags": [],
+                "rationale": "<placeholder>",
+            }),
+        )
+        assert result["rationale"] is None
+
+    def test_parse_rationale_truncates_at_4kib(self, query_service):
+        """Belt: response field caps at 4 KiB matching the DB column cap."""
+        long = "x" * 10_000
+        result = query_service._parse_enrichment_response(
+            "bug-1",
+            json.dumps({
+                "category": "ui", "severity": "low", "root_cause": "x",
+                "components": [], "tags": [],
+                "rationale": long,
+            }),
+        )
+        assert len(result["rationale"]) == 4096
+
+    def test_default_enrichment_has_rationale_none(self, query_service):
+        """Failed parsing → defaults must still include rationale=None so the
+        response model construction doesn't blow up on a missing key."""
+        result = query_service._default_enrichment("bug-x")
+        assert result["rationale"] is None
+
+    @pytest.mark.asyncio
+    async def test_enrich_bug_without_tenant_id_skips_observability(
+        self, query_service, mock_llm_provider
+    ):
+        """Backward-compat: callers that haven't been threaded through yet
+        get no event_id and don't try to write intelligence_event."""
+        mock_llm_provider.generate.return_value = json.dumps({
+            "category": "crash", "severity": "high",
+            "root_cause": "NPE in payment processor",
+            "components": [], "tags": [],
+            "rationale": "Severity high because checkout path crash.",
+        })
+
+        result = await query_service.enrich_bug(
+            bug_id="bug-1",
+            title="Checkout crashes",
+        )
+
+        # rationale parsed from the body even without tenant_id
+        assert result["rationale"] == "Severity high because checkout path crash."
+        # but no event_id (call wasn't wrapped)
+        assert result["event_id"] is None
+        # the unwrapped path uses llm.generate directly, not generate_with_usage
+        mock_llm_provider.generate.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_enrich_bug_with_tenant_id_records_event_and_updates_rationale(
+        self, query_service, mock_llm_provider
+    ):
+        """Wrapped path: when tenant_id is provided, enrich_bug routes the
+        LLM call through record_generate (so an intelligence_event row is
+        persisted) AND fires a follow-up UPDATE to set the rationale column.
+        The rationale arrives post-INSERT because the recorder persists
+        before the LLM body is parsed.
+        """
+        from uuid import UUID, uuid4
+        from unittest.mock import AsyncMock, patch
+
+        tenant_id = uuid4()
+        recorded_event_id = uuid4()
+
+        recorded_body = json.dumps({
+            "category": "crash", "severity": "critical",
+            "root_cause": "Race condition in checkout finalization",
+            "components": ["CheckoutForm"], "tags": ["race-condition"],
+            "rationale": "Critical because every checkout submission can hit the race.",
+        })
+
+        async def fake_record_generate(provider, prompt, *, ctx, **kwargs):
+            # Sanity: confirm the wrap is parameterised correctly.
+            assert ctx.tenant_id == tenant_id
+            assert ctx.operation == "enrich"
+            assert ctx.prompt_version.startswith("enrich.")
+            assert ctx.bug_id == "bug-99"
+            return recorded_body, recorded_event_id
+
+        captured_updates: list[tuple] = []
+
+        # Mimic the async-with pool/connection/cursor chain.
+        class _FakeCursor:
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *a):
+                return None
+            async def execute(self, sql, params):
+                captured_updates.append((sql, params))
+
+        class _FakeConn:
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *a):
+                return None
+            def cursor(self):
+                return _FakeCursor()
+            async def commit(self):
+                return None
+
+        class _FakePool:
+            def connection(self):
+                return _FakeConn()
+
+        with (
+            patch(
+                "bugspotter_intelligence.services.bug_query_service.record_generate",
+                side_effect=fake_record_generate,
+            ),
+            # Patch the local-namespace binding (not db.database.get_pool) —
+            # the import was hoisted to the top of bug_query_service.py, so
+            # the symbol is resolved at import time and patching the source
+            # module would have no effect inside this service.
+            patch(
+                "bugspotter_intelligence.services.bug_query_service.get_pool",
+                return_value=_FakePool(),
+            ),
+        ):
+            result = await query_service.enrich_bug(
+                bug_id="bug-99",
+                title="Checkout sometimes loses orders",
+                description="Race between two click handlers",
+                tenant_id=tenant_id,
+            )
+
+        # event_id is passed through as a UUID (not stringified) — Pydantic
+        # accepts it directly on EnrichBugResponse.event_id: Optional[UUID].
+        assert result["event_id"] == recorded_event_id
+        # rationale parsed and surfaced on the response
+        assert result["rationale"] == (
+            "Critical because every checkout submission can hit the race."
+        )
+        # UPDATE was fired on the right row with the right value
+        assert len(captured_updates) == 1
+        sql, params = captured_updates[0]
+        assert "UPDATE intelligence_event" in sql
+        assert "SET rationale = %s" in sql
+        assert params[0] == result["rationale"]
+        assert params[1] == recorded_event_id
+        # llm.generate must NOT have been called directly — the wrap goes
+        # through record_generate, which uses generate_with_usage.
+        mock_llm_provider.generate.assert_not_called()

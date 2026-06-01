@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from urllib.parse import urlparse
 from uuid import UUID
@@ -7,8 +8,15 @@ from psycopg import AsyncConnection
 
 from bugspotter_intelligence.config import Settings
 from bugspotter_intelligence.db.bug_repository import BugRepository
+from bugspotter_intelligence.db.database import get_pool
 from bugspotter_intelligence.llm import LLMProvider
+from bugspotter_intelligence.observability import CallContext, record_generate
 from bugspotter_intelligence.services.embeddings import EmbeddingProvider
+
+logger = logging.getLogger(__name__)
+
+_ENRICH_PROMPT_VERSION = "enrich.v1"
+_MAX_RATIONALE_CHARS = 4096
 
 
 class BugQueryService:
@@ -211,12 +219,20 @@ class BugQueryService:
         console_logs: list[dict] | None = None,
         network_logs: list[dict] | None = None,
         metadata: dict | None = None,
+        *,
+        tenant_id: UUID | None = None,
     ) -> dict:
         """
         Analyze bug and generate enrichment data using the LLM.
 
-        Returns category, severity, tags, root cause summary,
-        affected components, and confidence scores.
+        Returns category, severity, tags, root cause summary, affected
+        components, confidence scores, plus a one-sentence `rationale`
+        the LLM gives for the chosen severity / category — surfaced to
+        admin UI for explainability and persisted as
+        `intelligence_event.rationale` when `tenant_id` is provided.
+        When `tenant_id` is None the call is unwrapped (back-compat for
+        any caller that hasn't been threaded through yet); event_id
+        comes back as None in that case.
         """
         # Build context from all available bug data
         context_parts = [f"Title: {title}"]
@@ -285,16 +301,66 @@ Return this exact JSON structure:
   "severity": "<one of: critical, high, medium, low>",
   "root_cause": "<1-2 sentence summary of the likely root cause>",
   "components": ["<affected component names, e.g. CheckoutForm, PaymentService>"],
-  "tags": ["<descriptive tags, e.g. null-pointer, race-condition, timeout>"]
+  "tags": ["<descriptive tags, e.g. null-pointer, race-condition, timeout>"],
+  "rationale": "<one short sentence (<= 250 chars) explaining why this severity and category, for compliance / admin audit display>"
 }}"""
 
-        raw_response = await self.llm.generate(
-            prompt=prompt,
-            temperature=0.2,
-            max_tokens=400,
-        )
+        event_id: UUID | None = None
+        if tenant_id is not None:
+            ctx = CallContext(
+                tenant_id=tenant_id,
+                operation="enrich",
+                prompt_version=_ENRICH_PROMPT_VERSION,
+                bug_id=bug_id,
+            )
+            raw_response, event_id = await record_generate(
+                self.llm, prompt, ctx=ctx,
+                temperature=0.2, max_tokens=400,
+            )
+        else:
+            raw_response = await self.llm.generate(
+                prompt=prompt,
+                temperature=0.2,
+                max_tokens=400,
+            )
 
-        return self._parse_enrichment_response(bug_id, raw_response)
+        parsed = self._parse_enrichment_response(bug_id, raw_response)
+
+        # rationale comes back from the parser as part of the response payload.
+        # When the call was wrapped in record_generate, also UPDATE the
+        # intelligence_event.rationale column so admin observability can
+        # surface "why" later without an extra LLM call. The recorder
+        # persists at INSERT time before the LLM body is parsed, so the
+        # rationale arrives via this small follow-up UPDATE rather than
+        # ctx.rationale.
+        if event_id is not None and parsed.get("rationale"):
+            await self._attach_rationale_to_event(event_id, parsed["rationale"])
+
+        # Pass the UUID through directly — Pydantic handles UUID natively on
+        # EnrichBugResponse.event_id (Optional[UUID]) and serializes to a
+        # JSON string at the wire. Stringifying here would just round-trip.
+        parsed["event_id"] = event_id
+        return parsed
+
+    async def _attach_rationale_to_event(self, event_id: UUID, rationale: str) -> None:
+        """Patch the `rationale` column on the intelligence_event row we just
+        wrote. Persistence failure here is non-fatal — the audit row already
+        lives; rationale is a downstream display string, not a contract.
+        """
+        # Cap at the same 4 KiB the recorder caps for direct-passed rationales.
+        if len(rationale) > _MAX_RATIONALE_CHARS:
+            rationale = rationale[:_MAX_RATIONALE_CHARS]
+        try:
+            pool = get_pool()
+            async with pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        "UPDATE intelligence_event SET rationale = %s WHERE id = %s",
+                        (rationale, event_id),
+                    )
+                await conn.commit()
+        except Exception:
+            logger.exception("Failed to attach rationale to intelligence_event %s", event_id)
 
     def _parse_enrichment_response(self, bug_id: str, raw: str) -> dict:
         """Parse LLM JSON response into enrichment format with confidence scores."""
@@ -364,6 +430,16 @@ Return this exact JSON structure:
         if not has_root_cause:
             root_cause = "Unable to determine root cause"
 
+        # rationale is optional — older models without the field in the
+        # prompt and edge cases still need to enrich successfully, so a
+        # missing rationale collapses to None rather than failing the call.
+        raw_rationale = parsed.get("rationale")
+        rationale: str | None = None
+        if isinstance(raw_rationale, str):
+            cleaned = raw_rationale.strip()
+            if cleaned and not cleaned.startswith("<"):
+                rationale = cleaned[:_MAX_RATIONALE_CHARS]
+
         return {
             "bug_id": bug_id,
             "category": category,
@@ -378,6 +454,7 @@ Return this exact JSON structure:
                 "root_cause": base_confidence if has_root_cause else 0.3,
                 "components": base_confidence * 0.85 if components else 0.2,
             },
+            "rationale": rationale,
         }
 
     def _default_enrichment(self, bug_id: str) -> dict:
@@ -396,4 +473,5 @@ Return this exact JSON structure:
                 "root_cause": 0.1,
                 "components": 0.1,
             },
+            "rationale": None,
         }
