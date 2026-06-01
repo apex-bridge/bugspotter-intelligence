@@ -82,6 +82,15 @@ class EnrichBugResponse(BaseModel):
     event_id: Optional[UUID] = Field(
         None, description="intelligence_event id; pass to /api/v1/intelligence/feedback"
     )
+    rationale: Optional[str] = Field(
+        None,
+        description=(
+            "One-sentence justification of the chosen severity / category — surfaced "
+            "to admin observability UI for compliance and explainability. May be "
+            "null when the LLM didn't include the field (older prompts) or when the "
+            "response failed to parse."
+        ),
+    )
 
 
 class BugDetailResponse(BaseModel):

@@ -79,6 +79,7 @@ async def enrich_bug(
         console_logs=body.console_logs,
         network_logs=body.network_logs,
         metadata=body.metadata,
+        tenant_id=tenant.tenant_id,
     )
 
     return EnrichBugResponse(**result)
