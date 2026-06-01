@@ -6,6 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from psycopg import AsyncConnection
+from psycopg.rows import dict_row
 
 from bugspotter_intelligence.api.deps import get_cache
 from bugspotter_intelligence.auth import (
@@ -293,7 +294,10 @@ async def observability_events(
     where_sql = "WHERE " + " AND ".join(where)
     params_with_pagination = params + [limit, offset]
 
-    async with conn.cursor() as cur:
+    # dict_row maps each column to its name, so adding/removing columns
+    # can't silently rotate a positional unpacking — Pydantic validates by
+    # field name and a mismatch surfaces as an explicit ValidationError.
+    async with conn.cursor(row_factory=dict_row) as cur:
         await cur.execute(
             f"""
             SELECT id, tenant_id, operation, bug_id, provider, model, prompt_version,
@@ -308,16 +312,7 @@ async def observability_events(
         )
         rows = await cur.fetchall()
 
-    events = [
-        ObservabilityEvent(
-            id=r[0], tenant_id=r[1], operation=r[2], bug_id=r[3],
-            provider=r[4], model=r[5], prompt_version=r[6],
-            tokens_in=r[7], tokens_out=r[8], cost_micros_usd=r[9],
-            latency_ms=r[10], confidence=r[11], rationale=r[12],
-            status=r[13], error_kind=r[14], cached=r[15], created_at=r[16],
-        )
-        for r in rows
-    ]
+    events = [ObservabilityEvent.model_validate(r) for r in rows]
     return ObservabilityEventsResponse(events=events, limit=limit, offset=offset)
 
 
