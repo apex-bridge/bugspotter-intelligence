@@ -66,7 +66,7 @@ class Settings(BaseSettings):
         default=120.0, gt=0.0, description="Timeout in seconds for Claude API calls"
     )
     openai_api_key: str | None = None
-    openai_model: str = "gpt-4"
+    openai_model: str = "gpt-4o-mini"
     openai_timeout: float = Field(
         default=120.0, gt=0.0, description="Timeout in seconds for OpenAI API calls"
     )
