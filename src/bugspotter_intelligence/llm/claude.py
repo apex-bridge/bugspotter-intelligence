@@ -1,3 +1,4 @@
+import re
 from typing import Optional
 
 import anthropic
@@ -6,11 +7,18 @@ from anthropic import AsyncAnthropic
 from .base import LLMProvider, Usage
 from .factory import register_provider
 
-# Opus 4.7 and later removed the sampling parameters (temperature/top_p/top_k)
-# and return a 400 if they are sent — those models use adaptive thinking
-# instead. Skip `temperature` for them; every other Claude model (Sonnet 4.6,
-# Sonnet 4.0, etc.) still accepts it.
-_NO_SAMPLING_PARAMS = ("opus-4-7", "opus-4-8")
+# Opus 4.7 and every later Opus revision reject the sampling parameters
+# (temperature/top_p/top_k) with a 400 — those models use adaptive thinking
+# instead. Match the opus-4-<rev> family with rev >= 7. The `(?!\d)` guards the
+# dated Opus 4.0 id (claude-opus-4-20250514), whose 8-digit date must not be
+# read as a revision; every other Claude model (Sonnet 4.6, Opus 4.0/4.1/4.5/4.6)
+# still accepts temperature.
+_OPUS_REV = re.compile(r"opus-4-(\d{1,2})(?!\d)")
+
+
+def _rejects_sampling_params(model: str) -> bool:
+    match = _OPUS_REV.search(model)
+    return bool(match) and int(match.group(1)) >= 7
 
 
 @register_provider("claude")
@@ -53,7 +61,7 @@ class ClaudeProvider(LLMProvider):
             "max_tokens": max_tokens,
             "messages": [{"role": "user", "content": full_prompt}],
         }
-        if not any(tag in model for tag in _NO_SAMPLING_PARAMS):
+        if not _rejects_sampling_params(model):
             kwargs["temperature"] = temperature
 
         try:

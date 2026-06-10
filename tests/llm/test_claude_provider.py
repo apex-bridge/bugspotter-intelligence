@@ -3,7 +3,26 @@ import types
 import pytest
 
 from bugspotter_intelligence.config import Settings
-from bugspotter_intelligence.llm.claude import ClaudeProvider
+from bugspotter_intelligence.llm.claude import ClaudeProvider, _rejects_sampling_params
+
+
+@pytest.mark.parametrize(
+    "model,rejects",
+    [
+        ("claude-opus-4-7", True),
+        ("claude-opus-4-8", True),
+        ("claude-opus-4-9", True),   # future revision, must also be gated
+        ("claude-opus-4-10", True),
+        ("claude-opus-4-6", False),
+        ("claude-opus-4-5", False),
+        ("claude-opus-4-1-20250805", False),   # Opus 4.1 accepts temperature
+        ("claude-opus-4-20250514", False),     # legacy Opus 4.0 (dated id, not a revision)
+        ("claude-sonnet-4-6", False),
+        ("gpt-4", False),
+    ],
+)
+def test_rejects_sampling_params(model, rejects):
+    assert _rejects_sampling_params(model) is rejects
 
 
 def _fake_response(text="Hello!", input_tokens=11, output_tokens=22):
