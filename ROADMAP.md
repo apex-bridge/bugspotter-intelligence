@@ -14,6 +14,7 @@ Development roadmap for the `bugspotter-intelligence` RAG service. Each phase pr
 | PostgreSQL + pgvector | ✅ Complete | Docker Compose ready |
 | LLM Provider abstraction | ✅ Complete | Factory + Registry pattern |
 | Ollama integration | ✅ Complete | Local inference |
+| Claude / OpenAI generation providers | ✅ Complete | Anthropic / OpenAI SDKs; registered providers |
 | Embedding service | ✅ Complete | Local + OpenAI providers |
 | Bug similarity search | ✅ Complete | Cosine similarity via pgvector |
 | CQRS services | ✅ Complete | Command/Query separation |

@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     ollama_model: str = "llama3.2:3b"
     ollama_timeout: float = 120.0
     anthropic_api_key: str | None = None
-    claude_model: str = "claude-sonnet-4-20250514"
+    claude_model: str = "claude-sonnet-4-6"
     openai_api_key: str | None = None
     openai_model: str = "gpt-4"
     log_level: str = "INFO"
