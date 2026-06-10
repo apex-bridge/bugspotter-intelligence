@@ -48,7 +48,7 @@ async def test_status_reports_active_provider_model_and_key_presence():
         anthropic_api_key="sk-anthropic",
         claude_model="claude-sonnet-4-6",
     )
-    resp = await get_service_status(_=None, settings=settings, conn=_FakeConn((10, 0, 1024)))
+    resp = await get_service_status(settings=settings, conn=_FakeConn((10, 0, 1024)))
 
     assert resp.llm_provider == "claude"
     assert resp.llm_model == "claude-sonnet-4-6"
@@ -63,7 +63,7 @@ async def test_status_reports_active_provider_model_and_key_presence():
 @pytest.mark.asyncio
 async def test_status_flags_null_embeddings_unhealthy():
     settings = _settings(llm_provider="ollama")
-    resp = await get_service_status(_=None, settings=settings, conn=_FakeConn((100, 3, 1024)))
+    resp = await get_service_status(settings=settings, conn=_FakeConn((100, 3, 1024)))
 
     assert resp.llm_provider == "ollama"
     assert resp.llm_model == settings.ollama_model
@@ -74,7 +74,7 @@ async def test_status_flags_null_embeddings_unhealthy():
 @pytest.mark.asyncio
 async def test_status_empty_table_is_healthy_with_null_min_dim():
     settings = _settings(llm_provider="ollama")
-    resp = await get_service_status(_=None, settings=settings, conn=_FakeConn((0, 0, None)))
+    resp = await get_service_status(settings=settings, conn=_FakeConn((0, 0, None)))
 
     assert resp.embeddings.total == 0
     assert resp.embeddings.min_dim is None
@@ -84,7 +84,7 @@ async def test_status_empty_table_is_healthy_with_null_min_dim():
 @pytest.mark.asyncio
 async def test_status_never_leaks_key_values():
     settings = _settings(llm_provider="openai", openai_api_key="sk-super-secret")
-    resp = await get_service_status(_=None, settings=settings, conn=_FakeConn((1, 0, 1024)))
+    resp = await get_service_status(settings=settings, conn=_FakeConn((1, 0, 1024)))
 
     assert resp.openai_key_configured is True
     assert "sk-super-secret" not in resp.model_dump_json()

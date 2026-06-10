@@ -199,9 +199,12 @@ async def get_cache_stats(
     return CacheStatsResponse(**stats)
 
 
-@router.get("/status", response_model=ServiceStatusResponse)
+@router.get(
+    "/status",
+    response_model=ServiceStatusResponse,
+    dependencies=[Depends(require_master_key)],
+)
 async def get_service_status(
-    _: None = Depends(require_master_key),
     settings: Settings = Depends(get_settings),
     conn: AsyncConnection = Depends(get_db_connection),
 ) -> ServiceStatusResponse:
