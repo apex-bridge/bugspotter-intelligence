@@ -61,9 +61,15 @@ class Settings(BaseSettings):
     ollama_model: str = "llama3.2:3b"
     ollama_timeout: float = 120.0
     anthropic_api_key: str | None = None
-    claude_model: str = "claude-sonnet-4-20250514"
+    claude_model: str = "claude-sonnet-4-6"
+    claude_timeout: float = Field(
+        default=120.0, gt=0.0, description="Timeout in seconds for Claude API calls"
+    )
     openai_api_key: str | None = None
-    openai_model: str = "gpt-4"
+    openai_model: str = "gpt-4o-mini"
+    openai_timeout: float = Field(
+        default=120.0, gt=0.0, description="Timeout in seconds for OpenAI API calls"
+    )
     log_level: str = "INFO"
     debug: bool = False
     embedding_provider: str = "local"  # local, openai

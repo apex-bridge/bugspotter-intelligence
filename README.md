@@ -252,7 +252,8 @@ See [ROADMAP.md](ROADMAP.md) for detailed roadmap.
 
 ### Completed (v0.3.0)
 - [x] LLM provider abstraction with registry pattern
-- [x] Ollama provider (Claude and OpenAI configured but not implemented)
+- [x] Ollama provider (local generation)
+- [x] Claude and OpenAI generation providers (Anthropic / OpenAI SDKs)
 - [x] Docker Compose setup with pgvector
 - [x] Production Dockerfile with multi-stage build
 - [x] FastAPI REST API routes (13 endpoints)
@@ -267,7 +268,6 @@ See [ROADMAP.md](ROADMAP.md) for detailed roadmap.
 - [x] GitHub Actions CI/CD pipeline
 
 ### Planned (v0.4.0+)
-- [ ] Claude and OpenAI LLM providers
 - [ ] Feedback loop for improving suggestions
 - [ ] Root cause analysis
 - [ ] Bug summarization
