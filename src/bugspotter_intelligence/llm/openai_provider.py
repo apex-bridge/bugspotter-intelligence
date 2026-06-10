@@ -1,4 +1,3 @@
-import os
 from typing import Optional
 
 import openai
@@ -20,8 +19,7 @@ class OpenAIProvider(LLMProvider):
                 "openai_api_key (OPENAI_API_KEY) is required when "
                 "LLM_PROVIDER=openai"
             )
-        timeout = float(os.getenv("OPENAI_TIMEOUT", "120"))
-        self.client = AsyncOpenAI(api_key=api_key, timeout=timeout)
+        self.client = AsyncOpenAI(api_key=api_key, timeout=settings.openai_timeout)
 
     async def generate(
             self,
@@ -53,7 +51,7 @@ class OpenAIProvider(LLMProvider):
         except openai.OpenAIError as e:
             raise RuntimeError(f"OpenAI API error: {e}") from e
 
-        text = response.choices[0].message.content or ""
+        text = (response.choices[0].message.content or "") if response.choices else ""
 
         usage = Usage(
             input=response.usage.prompt_tokens if response.usage else None,

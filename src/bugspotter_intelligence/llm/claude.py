@@ -1,4 +1,3 @@
-import os
 from typing import Optional
 
 import anthropic
@@ -26,8 +25,7 @@ class ClaudeProvider(LLMProvider):
                 "anthropic_api_key (ANTHROPIC_API_KEY) is required when "
                 "LLM_PROVIDER=claude"
             )
-        timeout = float(os.getenv("CLAUDE_TIMEOUT", "120"))
-        self.client = AsyncAnthropic(api_key=api_key, timeout=timeout)
+        self.client = AsyncAnthropic(api_key=api_key, timeout=settings.claude_timeout)
 
     async def generate(
             self,
