@@ -222,15 +222,24 @@ async def get_service_status(
     provider = settings.llm_provider.lower()
 
     async with conn.cursor() as cur:
+        # Sample one non-NULL embedding's dimension via a scalar subquery rather
+        # than MIN(vector_dims(embedding)) over the whole table — the latter
+        # detoasts every vector. The column type is fixed vector(N), so all
+        # non-NULL rows share that dimension; a dimension mismatch surfaces as
+        # NULL inserts (the `nulls` count), not as a differing stored dim.
         await cur.execute(
             """
             SELECT COUNT(*) AS total,
                    COUNT(*) FILTER (WHERE embedding IS NULL) AS nulls,
-                   MIN(vector_dims(embedding)) AS min_dim
+                   (SELECT vector_dims(embedding)
+                      FROM bug_embeddings
+                     WHERE embedding IS NOT NULL
+                     LIMIT 1) AS sampled_dim
             FROM bug_embeddings
             """
         )
-        total, nulls, min_dim = await cur.fetchone()
+        row = await cur.fetchone()
+        total, nulls, min_dim = row if row else (0, 0, None)
 
     return ServiceStatusResponse(
         version=_SERVICE_VERSION,
