@@ -1,13 +1,14 @@
 """Admin API endpoints for key management and system stats"""
 
 from datetime import datetime
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from psycopg import AsyncConnection
 
-from bugspotter_intelligence.api.deps import get_cache
+from bugspotter_intelligence.api.deps import get_cache, get_settings
 from bugspotter_intelligence.auth import (
     APIKeyService,
     TenantContext,
@@ -15,6 +16,7 @@ from bugspotter_intelligence.auth import (
 )
 from bugspotter_intelligence.auth.dependencies import require_master_key
 from bugspotter_intelligence.cache import CacheService
+from bugspotter_intelligence.config import Settings
 from bugspotter_intelligence.db.database import get_db_connection
 from bugspotter_intelligence.models.requests import CreateAPIKeyRequest, CreateTenantAPIKeyRequest
 from bugspotter_intelligence.models.responses import (
@@ -22,13 +24,20 @@ from bugspotter_intelligence.models.responses import (
     APIKeyResponse,
     CacheStatsResponse,
     CreateAPIKeyResponse,
+    EmbeddingHealth,
     ObservabilityAccuracyResponse,
     ObservabilityEvent,
     ObservabilityEventsResponse,
     ObservabilityOpStat,
     ObservabilitySummaryResponse,
+    ServiceStatusResponse,
 )
 from bugspotter_intelligence.rate_limiting import check_rate_limit_admin
+
+try:
+    _SERVICE_VERSION = _pkg_version("bugspotter-intelligence")
+except PackageNotFoundError:  # pragma: no cover - only when run from a non-installed tree
+    _SERVICE_VERSION = "unknown"
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -188,6 +197,58 @@ async def get_cache_stats(
     """
     stats = await cache.get_stats()
     return CacheStatsResponse(**stats)
+
+
+@router.get("/status", response_model=ServiceStatusResponse)
+async def get_service_status(
+    _: None = Depends(require_master_key),
+    settings: Settings = Depends(get_settings),
+    conn: AsyncConnection = Depends(get_db_connection),
+) -> ServiceStatusResponse:
+    """
+    Operator-only service status (master key required).
+
+    Reports the active generation provider/model, whether cloud API keys are
+    configured (booleans only — secret values are never returned), the dedup
+    thresholds, and embedding-pipeline health (total rows, NULL count, and the
+    minimum stored dimension — `nulls > 0` is the silent-failure signal from a
+    dimension mismatch). Reads config + a single count query; no Ollama probe.
+    """
+    model_by_provider = {
+        "ollama": settings.ollama_model,
+        "claude": settings.claude_model,
+        "openai": settings.openai_model,
+    }
+    provider = settings.llm_provider.lower()
+
+    async with conn.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT COUNT(*) AS total,
+                   COUNT(*) FILTER (WHERE embedding IS NULL) AS nulls,
+                   MIN(vector_dims(embedding)) AS min_dim
+            FROM bug_embeddings
+            """
+        )
+        total, nulls, min_dim = await cur.fetchone()
+
+    return ServiceStatusResponse(
+        version=_SERVICE_VERSION,
+        llm_provider=provider,
+        llm_model=model_by_provider.get(provider),
+        anthropic_key_configured=bool(settings.anthropic_api_key),
+        openai_key_configured=bool(settings.openai_api_key),
+        similarity_threshold=settings.similarity_threshold,
+        duplicate_threshold=settings.duplicate_threshold,
+        embeddings=EmbeddingHealth(
+            provider=settings.embedding_provider,
+            model=settings.embedding_model,
+            total=total,
+            nulls=nulls,
+            min_dim=min_dim,
+            healthy=(nulls == 0),
+        ),
+    )
 
 
 def _build_time_window(

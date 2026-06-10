@@ -298,3 +298,44 @@ class CacheStatsResponse(BaseModel):
         ..., ge=0, description="Total cache misses since Redis started"
     )
     hit_rate: float = Field(..., ge=0.0, le=1.0, description="Cache hit rate (0.0-1.0)")
+
+
+class EmbeddingHealth(BaseModel):
+    """Embedding-pipeline health for GET /admin/status."""
+
+    provider: str = Field(..., description="Configured embedding provider")
+    model: Optional[str] = Field(
+        None, description="Embedding model name (None = provider default)"
+    )
+    total: int = Field(..., ge=0, description="Total rows in bug_embeddings")
+    nulls: int = Field(
+        ..., ge=0, description="Rows with a NULL embedding (regression signal if > 0)"
+    )
+    min_dim: Optional[int] = Field(
+        None, description="Minimum stored embedding dimension (None when empty)"
+    )
+    healthy: bool = Field(
+        ..., description="True when no NULL embeddings are present"
+    )
+
+
+class ServiceStatusResponse(BaseModel):
+    """Operator service readout for GET /admin/status.
+
+    Never includes secret values — only booleans for key presence.
+    """
+
+    version: str = Field(..., description="Running service version")
+    llm_provider: str = Field(..., description="Active generation provider")
+    llm_model: Optional[str] = Field(
+        None, description="Active model for the selected provider"
+    )
+    anthropic_key_configured: bool = Field(
+        ..., description="Whether an Anthropic API key is set (value never returned)"
+    )
+    openai_key_configured: bool = Field(
+        ..., description="Whether an OpenAI API key is set (value never returned)"
+    )
+    similarity_threshold: float = Field(..., ge=0.0, le=1.0)
+    duplicate_threshold: float = Field(..., ge=0.0, le=1.0)
+    embeddings: EmbeddingHealth
