@@ -31,3 +31,14 @@ def test_percentile_cont_casts_latency_ms_to_float():
     # This catches a regression where the cast moves to the wrong side of the
     # paren (e.g. `ORDER BY latency_ms)::float` which is valid SQL but a NOP cast).
     assert wrong not in text, f"found leftover uncast ORDER BY latency_ms): {wrong!r}"
+
+
+def test_summary_has_by_day_cost_and_token_rollup():
+    """The cost dashboard relies on a per-day rollup of cost + tokens. Assert the
+    aggregation is present (real-DB behavior is covered by integration tests)."""
+    text = _ADMIN_SRC.read_text(encoding="utf-8")
+    assert "date_trunc('day', created_at)::date AS day" in text
+    assert "GROUP BY day" in text
+    # Tokens are the always-populated metric; cost is the derived $ estimate.
+    for col in ("SUM(tokens_in)", "SUM(tokens_out)", "SUM(cost_micros_usd)"):
+        assert col in text, f"by_day rollup missing {col}"

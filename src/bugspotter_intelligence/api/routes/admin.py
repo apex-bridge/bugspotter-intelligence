@@ -27,6 +27,7 @@ from bugspotter_intelligence.models.responses import (
     CreateAPIKeyResponse,
     EmbeddingHealth,
     ObservabilityAccuracyResponse,
+    ObservabilityDayStat,
     ObservabilityEvent,
     ObservabilityEventsResponse,
     ObservabilityOpStat,
@@ -325,11 +326,34 @@ async def observability_summary(
         )
         by_op_rows = await cur.fetchall()
 
+        await cur.execute(
+            f"""
+            SELECT
+                date_trunc('day', created_at)::date AS day,
+                COUNT(*) AS calls,
+                COALESCE(SUM(cost_micros_usd), 0) AS cost_micros,
+                COALESCE(SUM(tokens_in), 0) AS tokens_in,
+                COALESCE(SUM(tokens_out), 0) AS tokens_out
+            FROM intelligence_event
+            {where_sql}
+            GROUP BY day
+            ORDER BY day
+            """,
+            params,
+        )
+        by_day_rows = await cur.fetchall()
+
     by_operation = [
         ObservabilityOpStat(
             operation=r[0], calls=r[1], p50_ms=r[2], p95_ms=r[3], cost_micros_usd=r[4],
         )
         for r in by_op_rows
+    ]
+    by_day = [
+        ObservabilityDayStat(
+            day=r[0], calls=r[1], cost_micros_usd=r[2], tokens_in=r[3], tokens_out=r[4],
+        )
+        for r in by_day_rows
     ]
     error_rate = (errors / calls) if calls else 0.0
 
@@ -343,6 +367,7 @@ async def observability_summary(
         p95_ms=p95,
         error_rate=error_rate,
         by_operation=by_operation,
+        by_day=by_day,
     )
 
 

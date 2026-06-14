@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal, Optional
 from uuid import UUID
 
@@ -233,6 +233,17 @@ class ObservabilityOpStat(BaseModel):
     cost_micros_usd: int = 0
 
 
+class ObservabilityDayStat(BaseModel):
+    """Per-day rollup for the cost dashboard. Tokens are always populated;
+    cost_micros_usd is a derived $ estimate (0 for local/Ollama calls)."""
+
+    day: date
+    calls: int
+    cost_micros_usd: int = 0
+    tokens_in: int = 0
+    tokens_out: int = 0
+
+
 class ObservabilitySummaryResponse(BaseModel):
     """Response from GET /admin/observability/summary."""
 
@@ -245,6 +256,7 @@ class ObservabilitySummaryResponse(BaseModel):
     p95_ms: Optional[float] = None
     error_rate: float = Field(..., ge=0.0, le=1.0)
     by_operation: list[ObservabilityOpStat]
+    by_day: list[ObservabilityDayStat] = Field(default_factory=list)
 
 
 class ObservabilityEvent(BaseModel):
