@@ -474,12 +474,12 @@ class TestObservabilityIsTenantReadable:
         return app
 
     @staticmethod
-    def _summary_conn():
-        """Mock connection whose cursor returns an empty-but-valid summary."""
+    def _conn(*, fetchone=None, fetchall=None):
+        """Mock connection whose cursor returns the given rows."""
         cur = AsyncMock()
         cur.execute = AsyncMock()
-        cur.fetchone = AsyncMock(return_value=(0, 0, None, None, 0))
-        cur.fetchall = AsyncMock(return_value=[])
+        cur.fetchone = AsyncMock(return_value=fetchone)
+        cur.fetchall = AsyncMock(return_value=fetchall if fetchall is not None else [])
         cm = MagicMock()
         cm.__aenter__ = AsyncMock(return_value=cur)
         cm.__aexit__ = AsyncMock(return_value=False)
@@ -487,10 +487,24 @@ class TestObservabilityIsTenantReadable:
         conn.cursor = MagicMock(return_value=cm)
         return conn
 
+    @staticmethod
+    def _assert_first_query_scoped(conn, tenant_id):
+        """The first SQL the handler runs must filter by the caller's tenant.
+
+        Guards against a regression that drops `WHERE tenant_id = %s` — the
+        response echoes tenant_id regardless, so only inspecting the executed
+        query proves the data is actually scoped.
+        """
+        cur = conn.cursor.return_value.__aenter__.return_value
+        sql, params = cur.execute.await_args_list[0].args
+        assert "tenant_id = %s" in sql
+        assert params[0] == tenant_id
+
     def test_summary_readable_by_non_admin_and_scoped_to_caller(
         self, non_admin_tenant_context
     ):
-        app = self._build_app(non_admin_tenant_context, self._summary_conn())
+        conn = self._conn(fetchone=(0, 0, None, None, 0), fetchall=[])
+        app = self._build_app(non_admin_tenant_context, conn)
 
         with TestClient(app) as client:
             resp = client.get(
@@ -499,12 +513,45 @@ class TestObservabilityIsTenantReadable:
             )
 
         assert resp.status_code == 200, resp.text
-        # Response is scoped to the caller's own tenant — no cross-tenant leak.
         assert resp.json()["tenant_id"] == str(non_admin_tenant_context.tenant_id)
+        self._assert_first_query_scoped(conn, non_admin_tenant_context.tenant_id)
+
+    def test_events_readable_by_non_admin_and_scoped_to_caller(
+        self, non_admin_tenant_context
+    ):
+        conn = self._conn(fetchall=[])
+        app = self._build_app(non_admin_tenant_context, conn)
+
+        with TestClient(app) as client:
+            resp = client.get(
+                "/api/v1/admin/observability/events",
+                headers={"Authorization": "Bearer any"},
+            )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["events"] == []
+        self._assert_first_query_scoped(conn, non_admin_tenant_context.tenant_id)
+
+    def test_accuracy_readable_by_non_admin_and_scoped_to_caller(
+        self, non_admin_tenant_context
+    ):
+        conn = self._conn(fetchone=(0, 0, 0, 0))
+        app = self._build_app(non_admin_tenant_context, conn)
+
+        with TestClient(app) as client:
+            resp = client.get(
+                "/api/v1/admin/observability/accuracy",
+                headers={"Authorization": "Bearer any"},
+            )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["tenant_id"] == str(non_admin_tenant_context.tenant_id)
+        self._assert_first_query_scoped(conn, non_admin_tenant_context.tenant_id)
 
     def test_admin_only_route_still_rejects_non_admin(self, non_admin_tenant_context):
         """Guard: the fix must NOT loosen the genuinely admin-only routes."""
-        app = self._build_app(non_admin_tenant_context, self._summary_conn())
+        conn = self._conn(fetchone=(0, 0, None, None, 0))
+        app = self._build_app(non_admin_tenant_context, conn)
 
         with TestClient(app) as client:
             resp = client.get(
