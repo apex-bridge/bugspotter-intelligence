@@ -34,7 +34,7 @@ from bugspotter_intelligence.models.responses import (
     ObservabilitySummaryResponse,
     ServiceStatusResponse,
 )
-from bugspotter_intelligence.rate_limiting import check_rate_limit_admin
+from bugspotter_intelligence.rate_limiting import check_rate_limit, check_rate_limit_admin
 
 try:
     _SERVICE_VERSION = _pkg_version("bugspotter-intelligence")
@@ -283,7 +283,10 @@ def _build_time_window(
 async def observability_summary(
     from_ts: datetime | None = Query(None, alias="from"),
     to_ts: datetime | None = Query(None, alias="to"),
-    tenant: TenantContext = Depends(check_rate_limit_admin),
+    # Reads the caller's OWN tenant data (scoped by tenant_id below), so a
+    # regular per-tenant key suffices — master-key-provisioned org keys are
+    # non-admin by design and must still see their own usage/cost.
+    tenant: TenantContext = Depends(check_rate_limit),
     conn: AsyncConnection = Depends(get_db_connection),
 ) -> ObservabilitySummaryResponse:
     """Aggregated stats over intelligence_event in a time window; scoped to caller's tenant."""
@@ -377,7 +380,8 @@ async def observability_events(
     event_status: Literal["ok", "error"] | None = Query(None, alias="status"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    tenant: TenantContext = Depends(check_rate_limit_admin),
+    # Caller's own tenant data (scoped by tenant_id below) — see summary above.
+    tenant: TenantContext = Depends(check_rate_limit),
     conn: AsyncConnection = Depends(get_db_connection),
 ) -> ObservabilityEventsResponse:
     """Recent intelligence_event rows, newest first; scoped to caller's tenant."""
@@ -419,7 +423,8 @@ async def observability_accuracy(
     operation: str | None = Query(None),
     from_ts: datetime | None = Query(None, alias="from"),
     to_ts: datetime | None = Query(None, alias="to"),
-    tenant: TenantContext = Depends(check_rate_limit_admin),
+    # Caller's own tenant data (scoped by tenant_id below) — see summary above.
+    tenant: TenantContext = Depends(check_rate_limit),
     conn: AsyncConnection = Depends(get_db_connection),
 ) -> ObservabilityAccuracyResponse:
     """Verdict counts + precision; scoped to caller's tenant via feedback × event JOIN."""

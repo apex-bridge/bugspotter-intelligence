@@ -434,3 +434,83 @@ class TestRevokeAPIKey:
             )
 
         assert exc_info.value.status_code == 404
+
+
+class TestObservabilityIsTenantReadable:
+    """The /observability/* endpoints must be readable by a NON-admin tenant key.
+
+    Org keys are provisioned via the master key and are non-admin by design
+    (master-key-provisioned keys set is_admin=False). The backend forwards the
+    org's own per-tenant key to these endpoints, so gating them on admin made
+    the cost/usage dashboard 403 for every org. The reads are tenant-scoped
+    (WHERE tenant_id = caller's id), so a regular key is the correct credential.
+
+    These go through the full HTTP/DI path on purpose — direct handler calls
+    bypass the Depends() that carries the auth requirement, so only a TestClient
+    run can catch the admin-gating regression.
+    """
+
+    def _build_app(self, tenant_ctx, conn):
+        from fastapi import FastAPI
+
+        from bugspotter_intelligence.api.routes.admin import router
+        from bugspotter_intelligence.auth.dependencies import (
+            _get_settings,
+            get_current_tenant,
+        )
+        from bugspotter_intelligence.db.database import get_db_connection
+        from bugspotter_intelligence.rate_limiting.dependencies import get_rate_limiter
+
+        app = FastAPI()
+        app.include_router(router, prefix="/api/v1")
+
+        settings = MagicMock()
+        settings.rate_limit_enabled = False  # skip the limiter branch
+
+        app.dependency_overrides[get_current_tenant] = lambda: tenant_ctx
+        app.dependency_overrides[_get_settings] = lambda: settings
+        app.dependency_overrides[get_db_connection] = lambda: conn
+        app.dependency_overrides[get_rate_limiter] = lambda: None
+        return app
+
+    @staticmethod
+    def _summary_conn():
+        """Mock connection whose cursor returns an empty-but-valid summary."""
+        cur = AsyncMock()
+        cur.execute = AsyncMock()
+        cur.fetchone = AsyncMock(return_value=(0, 0, None, None, 0))
+        cur.fetchall = AsyncMock(return_value=[])
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=cur)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        conn = MagicMock()
+        conn.cursor = MagicMock(return_value=cm)
+        return conn
+
+    def test_summary_readable_by_non_admin_and_scoped_to_caller(
+        self, non_admin_tenant_context
+    ):
+        app = self._build_app(non_admin_tenant_context, self._summary_conn())
+
+        with TestClient(app) as client:
+            resp = client.get(
+                "/api/v1/admin/observability/summary",
+                headers={"Authorization": "Bearer any"},
+            )
+
+        assert resp.status_code == 200, resp.text
+        # Response is scoped to the caller's own tenant — no cross-tenant leak.
+        assert resp.json()["tenant_id"] == str(non_admin_tenant_context.tenant_id)
+
+    def test_admin_only_route_still_rejects_non_admin(self, non_admin_tenant_context):
+        """Guard: the fix must NOT loosen the genuinely admin-only routes."""
+        app = self._build_app(non_admin_tenant_context, self._summary_conn())
+
+        with TestClient(app) as client:
+            resp = client.get(
+                "/api/v1/admin/api-keys",
+                headers={"Authorization": "Bearer any"},
+            )
+
+        assert resp.status_code == 403
+        assert "Admin privileges required" in resp.text
