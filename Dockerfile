@@ -28,7 +28,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.lock ./
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install --no-cache-dir --upgrade pip && \
+# Pin pip too (the last unpinned build tool) for fully deterministic builds —
+# 26.1.2 matches the verified prod runtime. setuptools/wheel are pinned in the
+# lock; bump all three together.
+RUN pip install --no-cache-dir "pip==26.1.2" && \
     pip install --no-cache-dir -r requirements.lock
 
 # Pre-download the active embedding model in the builder stage. Baking
