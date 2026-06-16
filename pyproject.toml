@@ -5,7 +5,12 @@ description = "RAG service for intelligent bug analysis"
 requires-python = ">=3.12"
 
 dependencies = [
-    "fastapi>=0.95.0",
+    # Cap below 0.137: 0.137.0 refactored include_router so app.routes is a
+    # tree of intermediate objects (_IncludedRouter) instead of a flat list of
+    # APIRoute. prometheus-fastapi-instrumentator 8.0.0 iterates app.routes and
+    # accesses route.path, so 0.137+ makes every /api/v1/* route 500. No
+    # instrumentator release fixes this yet — revisit the cap when one ships.
+    "fastapi>=0.95.0,<0.137",
     "uvicorn[standard]>=0.22.0",
     "pydantic-settings>=2.5.0",
     "python-dotenv>=1.0.0",
