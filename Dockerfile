@@ -19,14 +19,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy dependency files and source (pip install . needs the source)
-COPY pyproject.toml ./
+COPY pyproject.toml requirements.lock ./
 COPY src/ ./src/
 
-# Install all dependencies + package into a virtual environment
+# Install the fully-pinned dependency closure first, then the local package
+# WITHOUT re-resolving its deps. requirements.lock pins every transitive
+# version so the image builds reproducibly — without it, pyproject's `>=`
+# ranges float to the newest release on each build (how FastAPI 0.137 shipped
+# silently and broke the API, see #43). Regenerate the lock per its header.
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir .
+    pip install --no-cache-dir -r requirements.lock && \
+    pip install --no-cache-dir --no-deps .
 
 # Pre-download the active embedding model in the builder stage. Baking
 # the model into the image trades a larger image (~3 GB total vs ~1 GB)
