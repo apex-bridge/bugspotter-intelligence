@@ -18,6 +18,7 @@ on:
       - 'src/**'
       - 'Dockerfile'
       - 'pyproject.toml'
+      - 'requirements.lock'
       - 'docker/**'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
