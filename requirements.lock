@@ -98,3 +98,6 @@ uvicorn==0.49.0
 uvloop==0.22.1
 watchfiles==1.2.0
 websockets==16.0
+# Build backend (setuptools is already pinned above). Pinned so the local
+# package builds with --no-build-isolation from the lock — no PyPI fetch.
+wheel==0.47.0

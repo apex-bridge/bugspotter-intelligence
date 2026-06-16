@@ -31,7 +31,7 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.lock && \
-    pip install --no-cache-dir --no-deps .
+    pip install --no-cache-dir --no-deps --no-build-isolation .
 
 # Pre-download the active embedding model in the builder stage. Baking
 # the model into the image trades a larger image (~3 GB total vs ~1 GB)
