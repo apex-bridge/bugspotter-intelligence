@@ -18,20 +18,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy dependency files and source (pip install . needs the source)
-COPY pyproject.toml ./
-COPY src/ ./src/
-
-# Install all dependencies + package into a virtual environment
+# Install the fully-pinned dependency closure in its own layer, keyed ONLY on
+# requirements.lock — copying src/ first would bust this cache on every code
+# change and force a full reinstall of heavy deps (torch/CUDA). The lock pins
+# every transitive version so the image builds reproducibly; without it,
+# pyproject's `>=` ranges float to the newest release on each build (how
+# FastAPI 0.137 shipped silently and broke the API, see #43). Regenerate the
+# lock per its header.
+COPY requirements.lock ./
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir .
+# Pin pip too (the last unpinned build tool) for fully deterministic builds —
+# 26.1.2 matches the verified prod runtime. setuptools/wheel are pinned in the
+# lock; bump all three together.
+RUN pip install --no-cache-dir "pip==26.1.2" && \
+    pip install --no-cache-dir -r requirements.lock
 
 # Pre-download the active embedding model in the builder stage. Baking
 # the model into the image trades a larger image (~3 GB total vs ~1 GB)
 # for predictable cold starts: no HF Hub download on first request, no
 # OOM-risk window where lazy load races against the worker timeout.
+# Placed before the source copy so a code change doesn't re-download it;
+# it depends only on sentence-transformers from the lock layer above.
 #
 # IMPORTANT: this MUST match db/migrations.py target_dim and the active
 # EMBEDDING_MODEL passed via env. Currently BAAI/bge-m3 (1024-dim,
@@ -42,6 +50,13 @@ ENV SENTENCE_TRANSFORMERS_HOME=/app/.cache \
     TORCH_HOME=/app/.cache/torch
 RUN mkdir -p /app/.cache/huggingface /app/.cache/torch && \
     python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-m3')"
+
+# Then the local package (fast layer) — WITHOUT re-resolving its deps and
+# WITHOUT build isolation, so it builds from the lock-pinned setuptools/wheel
+# with no PyPI fetch. Only this layer rebuilds when source changes.
+COPY pyproject.toml ./
+COPY src/ ./src/
+RUN pip install --no-cache-dir --no-deps --no-build-isolation .
 
 # ============================================================================
 # Stage 2: Production
