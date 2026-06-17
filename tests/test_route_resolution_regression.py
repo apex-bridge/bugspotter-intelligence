@@ -22,7 +22,13 @@ from starlette.requests import Request
 from bugspotter_intelligence.main import create_app
 
 
-def _make_request(app, path: str) -> Request:
+@pytest.fixture(scope="module")
+def app() -> fastapi.FastAPI:
+    """The real application, built once and shared across the cases below."""
+    return create_app()
+
+
+def _make_request(app: fastapi.FastAPI, path: str) -> Request:
     """Minimal ASGI request carrying the real app, enough for route resolution."""
     return Request(
         {
@@ -44,14 +50,13 @@ def _make_request(app, path: str) -> Request:
         "/api/v1/admin/observability/summary",
     ],
 )
-def test_instrumentator_resolves_route_name_without_crashing(path):
+def test_instrumentator_resolves_route_name_without_crashing(app: fastapi.FastAPI, path: str):
     """The Prometheus instrumentator must resolve names over the real route tree.
 
     This runs the exact code path that 500'd in prod (#43). If FastAPI's routing
     model and the instrumentator are ever incompatible again, get_route_name
     raises AttributeError here rather than taking the API down.
     """
-    app = create_app()
     request = _make_request(app, path)
 
     # Raises AttributeError('_IncludedRouter' ... 'path') if the regression returns.
