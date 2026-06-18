@@ -144,6 +144,14 @@ jobs:
             --password-stdin \
             cr.yandexcloud.kz
 
+          # Reclaim disk before pulling. Each deploy pulls a fresh ~3GB image
+          # and old :latest images aren't replaced in place, so without this the
+          # 58GB VM fills up and the pull fails with "no space left on device".
+          # Safe: prune only removes images not used by a running container.
+          echo "Pruning unused images..."
+          docker image prune -af || true
+          df -h / | tail -1
+
           # Pull the new intelligence image
           echo "Pulling latest intelligence image..."
           docker compose --profile intelligence pull intelligence || {
