@@ -2,12 +2,17 @@
 
 # (provider, model_prefix) -> (input_micros_per_mtok, output_micros_per_mtok)
 # Prefix-match: model 'claude-sonnet-4-6-20260301' matches prefix 'claude-sonnet-4-6'.
+#
+# The provider key MUST be the name recorder._resolve_provider_name() emits —
+# the class name minus "Provider", lowercased: ClaudeProvider -> "claude",
+# OpenAIProvider -> "openai". Keying Anthropic under "anthropic" (the API-vendor
+# name) silently never matched, so every Claude call recorded cost_micros=None.
 _PRICES_PER_MTOK: dict[tuple[str, str], tuple[int, int]] = {
-    ("anthropic", "claude-opus-4-7"):   (15_000_000, 75_000_000),
-    ("anthropic", "claude-sonnet-4-6"): (3_000_000, 15_000_000),
-    ("anthropic", "claude-haiku-4-5"):  (1_000_000, 5_000_000),
-    ("openai",    "gpt-4o-mini"):       (150_000, 600_000),
-    ("openai",    "gpt-4o"):            (2_500_000, 10_000_000),
+    ("claude",  "claude-opus-4-7"):   (15_000_000, 75_000_000),
+    ("claude",  "claude-sonnet-4-6"): (3_000_000, 15_000_000),
+    ("claude",  "claude-haiku-4-5"):  (1_000_000, 5_000_000),
+    ("openai",  "gpt-4o-mini"):       (150_000, 600_000),
+    ("openai",  "gpt-4o"):            (2_500_000, 10_000_000),
 }
 
 
