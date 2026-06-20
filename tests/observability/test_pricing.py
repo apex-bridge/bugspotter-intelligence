@@ -3,11 +3,11 @@ from bugspotter_intelligence.observability.pricing import price_micros
 
 class TestPriceMicros:
     def test_known_claude_sonnet(self):
-        # 1000 input × $3/Mtok + 500 output × $15/Mtok = $0.003 + $0.0075 = $0.0105
+        # 1000 input x $3/Mtok + 500 output x $15/Mtok = $0.003 + $0.0075 = $0.0105
         assert price_micros("claude", "claude-sonnet-4-6", 1000, 500) == 10_500
 
     def test_known_openai_gpt_4o_mini(self):
-        # 1000 × $0.15/Mtok + 500 × $0.60/Mtok = $0.00015 + $0.00030 = $0.00045
+        # 1000 x $0.15/Mtok + 500 x $0.60/Mtok = $0.00015 + $0.00030 = $0.00045
         assert price_micros("openai", "gpt-4o-mini", 1000, 500) == 450
 
     def test_model_with_dated_suffix_matches_prefix(self):
@@ -47,10 +47,11 @@ class TestPricingMatchesResolvedProviderName:
 
     @staticmethod
     def _resolved_name(provider_cls) -> str:
-        # Mirror recorder._resolve_provider_name's class-name derivation.
-        name = provider_cls.__name__
-        assert name.endswith("Provider")
-        return name[: -len("Provider")].lower()
+        # Call the real resolver (no mirror → no drift). object.__new__ skips
+        # __init__ so we don't need settings or API keys.
+        from bugspotter_intelligence.observability.recorder import _resolve_provider_name
+
+        return _resolve_provider_name(object.__new__(provider_cls))
 
     def test_claude_provider_name_prices(self):
         from bugspotter_intelligence.llm.claude import ClaudeProvider
